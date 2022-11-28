@@ -3,7 +3,6 @@ package com.etendoerp.asyncprocess.serdes;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-
 import org.apache.commons.lang.SerializationException;
 import org.apache.kafka.common.serialization.Deserializer;
 
@@ -20,7 +19,7 @@ public class AsyncProcessDeserializer implements Deserializer<AsyncProcess> {
   @Override
   public AsyncProcess deserialize(String topic, byte[] data) {
     try {
-      if (data == null){
+      if (data == null) {
         return null;
       }
       return objectMapper.readValue(new String(data, StandardCharsets.UTF_8), AsyncProcess.class);

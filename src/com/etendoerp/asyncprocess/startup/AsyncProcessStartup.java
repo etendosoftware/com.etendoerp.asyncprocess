@@ -22,7 +22,6 @@ import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.criterion.Restrictions;
 import org.openbravo.base.util.OBClassLoader;
 import org.openbravo.base.weld.WeldUtils;
-import org.openbravo.client.application.Process;
 import org.openbravo.client.kernel.ComponentProvider;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
@@ -106,7 +105,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   private AsyncProcessState convertState(String status) {
     var state = AsyncProcessState.STARTED;
-    if(!StringUtils.isEmpty(status)) {
+    if (!StringUtils.isEmpty(status)) {
       switch (status) {
         case "WAITING":
           state = AsyncProcessState.WAITING;
@@ -131,7 +130,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   /**
    * Method called to create a consumer based on configured actions
-   * @param action in which we need to create a consumer
+   *
+   * @param action
+   *     in which we need to create a consumer
    * @return a consumer called dinamically based on configuration
    * @throws ClassNotFoundException
    */
@@ -143,7 +144,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   /**
    * Calculate current topic based on configuration
-   * @param job Global job
+   *
+   * @param job
+   *     Global job
    * @return error topic
    */
   private String calculateErrorTopic(Job job) {
@@ -158,8 +161,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   /**
    * Calculate topic to send the response
-   * @param jobLine Current job line
-   * @param jobLines all lines
+   *
+   * @param jobLine
+   *     Current job line
+   * @param jobLines
+   *     all lines
    * @return calculated topic
    */
   private String calculateNextTopic(JobLine jobLine, List<JobLine> jobLines) {
@@ -179,8 +185,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   /**
    * Method to calculate topic to subscribe
-   * @param jobLine current job line
-   * @param jobLines all job lines
+   *
+   * @param jobLine
+   *     current job line
+   * @param jobLines
+   *     all job lines
    * @return calculated topic
    */
   private String calculateCurrentTopic(JobLine jobLine, List<JobLine> jobLines) {
@@ -206,8 +215,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   /**
    * Create a receiver based on configuration
-   * @param topic topic to subscribe
-   * @param isRegExp indicates if the indicated topic is a regular expression
+   *
+   * @param topic
+   *     topic to subscribe
+   * @param isRegExp
+   *     indicates if the indicated topic is a regular expression
    * @return Created receiver
    */
   public Flux<ReceiverRecord<String, AsyncProcessExecution>> createReceiver(String topic, boolean isRegExp) {
@@ -231,6 +243,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   /**
    * Create a global sender, needed to publish responses
+   *
    * @return Generated sender
    */
   public KafkaSender<String, AsyncProcessExecution> crateSender() {

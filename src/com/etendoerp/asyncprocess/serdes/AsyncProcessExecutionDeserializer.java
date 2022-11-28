@@ -30,7 +30,7 @@ public class AsyncProcessExecutionDeserializer implements Deserializer<AsyncProc
   @Override
   public AsyncProcessExecution deserialize(String topic, byte[] data) {
     try {
-      if (data == null){
+      if (data == null) {
         return null;
       }
       return objectMapper.readValue(new String(data, StandardCharsets.UTF_8), AsyncProcessExecution.class);

@@ -21,8 +21,6 @@ import java.util.Date;
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 
-
-
 public class AsyncProcessExecution implements Comparable<AsyncProcessExecution> {
 
   private String id;
@@ -32,7 +30,7 @@ public class AsyncProcessExecution implements Comparable<AsyncProcessExecution> 
   private String params;
 
   @JsonFormat(shape = JsonFormat.Shape.STRING,
-    pattern = "dd-MM-yyyy hh:mm:ss")
+      pattern = "dd-MM-yyyy hh:mm:ss")
   private Date time;
   private AsyncProcessState state = AsyncProcessState.ACCEPTED;
 

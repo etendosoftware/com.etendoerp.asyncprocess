@@ -1,7 +1,5 @@
 package com.etendoerp.asyncprocess.startup;
 
-import static com.etendoerp.asyncprocess.util.TopicUtil.createTopic;
-
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -75,18 +73,18 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
           record.value());
       var params = record.value().getParams();
       var jsObj = new JSONObject(params);
-      if(!jsObj.has("jobs_job_id")) {
+      if (!jsObj.has("jobs_job_id")) {
         jsObj.put("jobs_job_id", jobId);
       }
-      if(!jsObj.has("client_id")) {
+      if (!jsObj.has("client_id")) {
         jsObj.put("client_id", clientId);
       }
-      if(!jsObj.has("org_id")) {
+      if (!jsObj.has("org_id")) {
         jsObj.put("org_id", orgId);
       }
       var result = consumer.apply(jsObj);
       jsObj.put("message", result.getMessage());
-      if(!StringUtils.isEmpty(result.getMessage())) {
+      if (!StringUtils.isEmpty(result.getMessage())) {
         log = log + "\n" + new Date() + ": " + result.getMessage();
       }
       responseRecord.setLog(log);
@@ -104,7 +102,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     }
   }
 
-  public  void createResponse(String topic, String asyncProcessId,
+  public void createResponse(String topic, String asyncProcessId,
       KafkaSender<String, AsyncProcessExecution> kafkaSender,
       AsyncProcessExecution responseRecord) {
     responseRecord.setId(Uuid.randomUuid().toString());
