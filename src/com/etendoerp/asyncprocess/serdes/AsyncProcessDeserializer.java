@@ -31,6 +31,6 @@ public class AsyncProcessDeserializer implements Deserializer<AsyncProcess> {
 
   @Override
   public void close() {
-    /* Placeholder for deserealization actions */
+    /* Placeholder for deserialization actions */
   }
 }
