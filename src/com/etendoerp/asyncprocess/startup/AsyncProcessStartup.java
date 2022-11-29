@@ -163,7 +163,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Calculate topic to send the response
+   * Calculate the subject to send the response. First, check if it is configured. If not, it is generated based on the
+   * next line. If the current one is the last one, the default result topic is used.
    *
    * @param jobLine
    *     Current job line
@@ -172,13 +173,14 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return calculated topic
    */
   private String calculateNextTopic(JobLine jobLine, List<JobLine> jobLines) {
-    String nextTopic;
-    if (StringUtils.isEmpty(jobLine.getEtapTargettopic())) {
-      return jobLines.indexOf(jobLine) == jobLines.size() - 1 ?
-          createTopic(jobLine.getJobsJob(), DEFAULT_RESULT_SUB_TOPIC) :
-          createTopic(jobLine.getJobsJob(), jobLine);
-    } else {
-      nextTopic = jobLine.getEtapTargettopic();
+    var job = jobLine.getJobsJob();
+    String nextTopic = jobLine.getEtapTargettopic();
+    if (StringUtils.isEmpty(nextTopic)) {
+      var position = jobLines.indexOf(jobLine);
+      nextTopic = createTopic(job,
+          (position < jobLines.size() - 1) ?
+              jobLines.get(position + 1).getLineNo().toString() :
+              DEFAULT_RESULT_SUB_TOPIC);
     }
     return nextTopic;
   }
@@ -199,7 +201,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
         job.getEtapInitialTopic() :
         jobLines.get(position - 1).getEtapTargettopic();
     if (StringUtils.isEmpty(topic)) {
-      topic = createTopic(job, jobLine);
+      topic = createTopic(job, jobLine.getLineNo());
     }
     return topic;
   }
