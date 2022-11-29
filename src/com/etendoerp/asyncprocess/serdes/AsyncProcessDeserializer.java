@@ -14,6 +14,7 @@ public class AsyncProcessDeserializer implements Deserializer<AsyncProcess> {
 
   @Override
   public void configure(Map<String, ?> configs, boolean isKey) {
+    /* This method is needed for future configurations on deserialize */
   }
 
   @Override
@@ -30,5 +31,6 @@ public class AsyncProcessDeserializer implements Deserializer<AsyncProcess> {
 
   @Override
   public void close() {
+    /* Placeholder for deserealization actions */
   }
 }

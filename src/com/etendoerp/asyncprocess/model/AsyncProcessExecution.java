@@ -2,6 +2,8 @@ package com.etendoerp.asyncprocess.model;
 
 import java.util.Date;
 
+import org.apache.commons.lang.NotImplementedException;
+
 import com.fasterxml.jackson.annotation.JsonFormat;
 
 
@@ -23,6 +25,16 @@ public class AsyncProcessExecution implements Comparable<AsyncProcessExecution> 
     var r = o.time.compareTo(this.time);
     if (r == 0) return o.id == null ? -1 : o.id.compareTo(this.id);
     return r;
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    return super.equals(obj);
+  }
+
+  @Override
+  public int hashCode() {
+    return super.hashCode();
   }
 
   public String getId() {

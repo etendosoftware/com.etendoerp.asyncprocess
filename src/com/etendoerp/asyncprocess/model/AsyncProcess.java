@@ -1,6 +1,7 @@
 package com.etendoerp.asyncprocess.model;
 
 import java.util.Date;
+import java.util.SortedSet;
 import java.util.TreeSet;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -14,7 +15,7 @@ public class AsyncProcess {
   private Date lastUpdate;
   private String description;
   private AsyncProcessState state = AsyncProcessState.WAITING;
-  private TreeSet<AsyncProcessExecution> executions = new TreeSet<>();
+  private SortedSet<AsyncProcessExecution> executions = new TreeSet<>();
 
   public AsyncProcess process(AsyncProcessExecution asyncProcessExecution) {
     addExecution(asyncProcessExecution);
@@ -60,11 +61,11 @@ public class AsyncProcess {
     this.state = state;
   }
 
-  public TreeSet<AsyncProcessExecution> getExecutions() {
+  public SortedSet<AsyncProcessExecution> getExecutions() {
     return executions;
   }
 
-  public void setExecutions(TreeSet<AsyncProcessExecution> executions) {
+  public void setExecutions(SortedSet<AsyncProcessExecution> executions) {
     this.executions = executions;
   }
 }

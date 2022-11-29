@@ -4,6 +4,8 @@ import com.smf.jobs.model.Job;
 import com.smf.jobs.model.JobLine;
 
 public class TopicUtil {
+  private TopicUtil() {
+  }
 
   public static String createTopic(Job job, JobLine jobLine) {
     return createTopic(job, jobLine, null);

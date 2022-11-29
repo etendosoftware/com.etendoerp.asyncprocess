@@ -16,6 +16,7 @@ public class AsyncProcessExecutionDeserializer implements Deserializer<AsyncProc
 
   @Override
   public void configure(Map<String, ?> configs, boolean isKey) {
+    /* This method is needed for future configurations on deserialize */
   }
 
   @Override
@@ -23,7 +24,7 @@ public class AsyncProcessExecutionDeserializer implements Deserializer<AsyncProc
     try {
       return objectMapper.writeValueAsBytes(data);
     } catch (JsonProcessingException e) {
-      throw new RuntimeException(e);
+      throw new SerializationException("Error serializing instance to byte[]");
     }
   }
 
@@ -41,5 +42,6 @@ public class AsyncProcessExecutionDeserializer implements Deserializer<AsyncProc
 
   @Override
   public void close() {
+    /* Placeholder for deserialization actions */
   }
 }

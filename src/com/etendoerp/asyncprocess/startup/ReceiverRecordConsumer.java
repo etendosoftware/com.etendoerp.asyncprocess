@@ -59,21 +59,21 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
 
   @Override
   public void accept(
-      ReceiverRecord<String, AsyncProcessExecution> record) {
-    var value = record.value();
+      ReceiverRecord<String, AsyncProcessExecution> receiverRecord) {
+    var value = receiverRecord.value();
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
     responseRecord.setDescription(value.getDescription());
     responseRecord.setAsyncProcessId(value.getAsyncProcessId());
     String log = value.getLog();
 
     try {
-      ReceiverOffset offset = record.receiverOffset();
+      ReceiverOffset offset = receiverRecord.receiverOffset();
       logger.info("Received message: topic-partition={} offset={} key={} value={}",
           offset.topicPartition(),
           offset.offset(),
-          record.key(),
-          record.value());
-      var strParams = record.value().getParams();
+          receiverRecord.key(),
+          receiverRecord.value());
+      var strParams = receiverRecord.value().getParams();
       var params = new JSONObject(strParams);
       if (!params.has("jobs_job_id")) {
         params.put("jobs_job_id", jobId);
@@ -92,14 +92,14 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       responseRecord.setLog(log);
       responseRecord.setParams(params.toString());
       responseRecord.setState(targetStatus);
-      createResponse(nextTopic, record.value().getAsyncProcessId(), kafkaSender,
+      createResponse(nextTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender,
           responseRecord);
     } catch (Exception e) {
-      e.printStackTrace();
+      logger.error("Ann error has ocurred on ReceiverRecordConsumer accept method", e);
       log = log + new Date() + e.getMessage();
       responseRecord.setLog(log);
       responseRecord.setState(AsyncProcessState.ERROR);
-      createResponse(errorTopic, record.value().getAsyncProcessId(), kafkaSender,
+      createResponse(errorTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender,
           responseRecord);
     }
   }

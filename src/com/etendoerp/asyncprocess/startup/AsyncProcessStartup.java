@@ -52,13 +52,12 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static final Logger log = LogManager.getLogger();
   private static final String DEFAULT_RESULT_SUB_TOPIC = "result";
   private static final String DEFAULT_ERROR_SUB_TOPIC = "error";
-  private KafkaSender<String, AsyncProcessExecution> kafkaSender;
 
   @Override
   public void init() {
     log.info("Etendo Reactor Startup");
     try {
-      kafkaSender = crateSender();
+      KafkaSender<String, AsyncProcessExecution> kafkaSender = crateSender();
       OBContext.setOBContext("100", "0", "0", "0");
       var critJob = OBDal.getInstance().createCriteria(Job.class);
       critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
@@ -93,12 +92,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
                 });
           })
           .collectMap(Map.Entry::getKey, Map.Entry::getValue)
-          .subscribe(flux -> {
-            log.info("Created subscribers {}", flux.keySet());
-          });
+          .subscribe(flux -> log.info("Created subscribers {}", flux.keySet()));
     } catch (Exception e) {
-      log.error("An error has ocurred on reactor startup {}", e.getMessage());
-      e.printStackTrace();
+      log.error("An error has ocurred on reactor startup", e);
     }
   }
 
