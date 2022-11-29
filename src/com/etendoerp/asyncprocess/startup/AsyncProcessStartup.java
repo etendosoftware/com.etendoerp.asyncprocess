@@ -6,7 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import javax.enterprise.context.ApplicationScoped;
@@ -18,20 +18,19 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.codehaus.jettison.json.JSONObject;
 import org.hibernate.criterion.Restrictions;
 import org.openbravo.base.util.OBClassLoader;
 import org.openbravo.base.weld.WeldUtils;
+import org.openbravo.client.application.Process;
 import org.openbravo.client.kernel.ComponentProvider;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 
-import com.etendoerp.asyncprocess.AsyncProcessor;
 import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
 import com.etendoerp.asyncprocess.model.AsyncProcessState;
 import com.etendoerp.asyncprocess.serdes.AsyncProcessExecutionDeserializer;
 import com.etendoerp.reactor.EtendoReactorSetup;
-import com.smf.jobs.ActionResult;
+import com.smf.jobs.Action;
 import com.smf.jobs.model.Job;
 import com.smf.jobs.model.JobLine;
 
@@ -77,7 +76,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
                     receiver.subscribe(
                         new ReceiverRecordConsumer(
                             job.getId(),
-                            createConsumer(jobLine.getAction()),
+                            createActionFactory(jobLine.getAction()),
                             calculateNextTopic(jobLine, jobLines),
                             calculateErrorTopic(job),
                             convertState(jobLine.getEtapTargetstatus()),
@@ -136,10 +135,22 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return a consumer called dinamically based on configuration
    * @throws ClassNotFoundException
    */
-  private Function<JSONObject, ActionResult> createConsumer(Process action) throws ClassNotFoundException {
+  private Supplier<Action> createActionFactory(Process action) throws ClassNotFoundException {
     var handler = OBClassLoader.getInstance().loadClass(action.getJavaClassName());
-    var inst = (AsyncProcessor) WeldUtils.getInstanceFromStaticBeanManager(handler);
-    return inst.consumer();
+    return new NewInstance(handler);
+  }
+
+  private static class NewInstance implements Supplier<Action> {
+    private final Class<?> handler;
+
+    public NewInstance(Class<?> handler) {
+      this.handler = handler;
+    }
+
+    @Override
+    public Action get() {
+      return (Action) WeldUtils.getInstanceFromStaticBeanManager(handler);
+    }
   }
 
   /**
@@ -150,13 +161,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return error topic
    */
   private String calculateErrorTopic(Job job) {
-    String errorTopic;
-    if (StringUtils.isEmpty(job.getEtapErrortopic())) {
-      errorTopic = createTopic(job, DEFAULT_ERROR_SUB_TOPIC);
-    } else {
-      errorTopic = job.getEtapErrortopic();
-    }
-    return errorTopic;
+    return StringUtils.isEmpty(job.getEtapErrortopic()) ?
+        createTopic(job, DEFAULT_ERROR_SUB_TOPIC) :
+        job.getEtapErrortopic();
   }
 
   /**
@@ -169,14 +176,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return calculated topic
    */
   private String calculateNextTopic(JobLine jobLine, List<JobLine> jobLines) {
-    var position = jobLines.indexOf(jobLine);
     String nextTopic;
     if (StringUtils.isEmpty(jobLine.getEtapTargettopic())) {
-      if (position == jobLines.size() - 1) {
-        nextTopic = createTopic(jobLine.getJobsJob(), DEFAULT_RESULT_SUB_TOPIC);
-      } else {
-        nextTopic = createTopic(jobLine.getJobsJob(), jobLine);
-      }
+      return jobLines.indexOf(jobLine) == jobLines.size() - 1 ?
+          createTopic(jobLine.getJobsJob(), DEFAULT_RESULT_SUB_TOPIC) :
+          createTopic(jobLine.getJobsJob(), jobLine);
     } else {
       nextTopic = jobLine.getEtapTargettopic();
     }
@@ -195,20 +199,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private String calculateCurrentTopic(JobLine jobLine, List<JobLine> jobLines) {
     var position = jobLines.indexOf(jobLine);
     var job = jobLine.getJobsJob();
-    String topic;
-    if (position == 0) {
-      if (StringUtils.isEmpty(job.getEtapInitialTopic())) {
-        topic = createTopic(job, jobLine);
-      } else {
-        topic = job.getEtapInitialTopic();
-      }
-    } else {
-      var prevLine = jobLines.get(position - 1);
-      if (StringUtils.isEmpty(prevLine.getEtapTargettopic())) {
-        topic = createTopic(job, jobLine);
-      } else {
-        topic = prevLine.getEtapTargettopic();
-      }
+    String topic = position == 0 ?
+        job.getEtapInitialTopic() :
+        jobLines.get(position - 1).getEtapTargettopic();
+    if (StringUtils.isEmpty(topic)) {
+      topic = createTopic(job, jobLine);
     }
     return topic;
   }
