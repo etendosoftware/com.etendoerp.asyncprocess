@@ -10,7 +10,7 @@ group          = "com.etendoerp"
 version        = "1.0.0"
 description    = "Etendo Async Processes"
 ext.artifact   = "asyncprocess"
-ext.repository = "https://repo.futit.cloud/repository/maven-releases"
+ext.repository = "https://maven.pkg.github.com/etendosoftware/com.etendoerp.platform.extensions"
 
 configurations {
     moduleDependencyContainer
@@ -27,7 +27,7 @@ publishing {
     }
     repositories {
         maven {
-            url "https://repo.futit.cloud/repository/maven-releases"
+            url "https://maven.pkg.github.com/etendosoftware/com.etendoerp.platform.extensions"
         }
     }
 }
@@ -35,10 +35,10 @@ publishing {
 repositories {
     mavenCentral()
     maven {
-        url "https://repo.futit.cloud/repository/maven-releases"
+        url "https://maven.pkg.github.com/etendosoftware/com.etendoerp.platform.extensions"
     }
     maven {
-        url "https://repo.futit.cloud/repository/maven-releases"
+        url "https://maven.pkg.github.com/etendosoftware/com.etendoerp.platform.extensions"
     }
     maven {
         url "https://repo.futit.cloud/repository/maven-public-releases"
