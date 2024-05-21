@@ -21,45 +21,21 @@ definitions:
               cat response.txt
               exit 1
             fi
+          - |
+            if ! grep -q "Valid branch name and correct destination" response.txt; then
+              echo "Git Police check failed: response does not contain 'Valid branch name and correct destination'"
+              echo "Full response:"
+              cat response.txt
+              exit 1
+            fi
           - echo "API call successful with status code $response"
           - cat response.txt
-        services:
-          - docker
-
-    - step: &check-pr-status
-        name: Check PR Status Step
-        script:
-          - apt-get update && apt-get install -y curl jq
-          - curl -L -o /usr/local/bin/jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-          - chmod +x /usr/local/bin/jq
-          - echo "Checking if the pull request was declined..."
-          - > 
-            pr_state=$(curl -s -S -f -X GET               -H "Authorization: Basic ${ETENDOBOT_TOKEN}"               "https://api.bitbucket.org/2.0/repositories/${BITBUCKET_REPO_OWNER}/${BITBUCKET_REPO_SLUG}/pullrequests/${BITBUCKET_PR_ID}" | jq -r '.state')
-          - echo "Pull request state $pr_state"
-          - |
-            if [ "$pr_state" == "DECLINED" ]; then
-              echo "Pull request was declined. Skipping subsequent steps."
-              echo "PR_DECLINED=true" > pr_status.env
-              exit 0
-            else
-              echo "PR_DECLINED=false" > pr_status.env
-              echo "Pull request was not declined. Continuing with subsequent steps."
-            fi
-        artifacts:
-          - pr_status.env
         services:
           - docker
 
     - step: &make-review
         name: Make Review Step
         script:
-          - cat pr_status.env
-          - source pr_status.env
-          - |
-            if [ "$PR_DECLINED" == "true" ]; then
-              echo "Skipping Make Review Step because PR is declined."
-              exit 0
-            fi
           - printenv
           - echo "-------------------------------------------------------------------------"
           - echo "${DOCKERHUB_PASSWORD}" | docker login --username "${DOCKERHUB_USERNAME}" --password-stdin
@@ -81,17 +57,6 @@ definitions:
     - step: &build-step
         name: SonarQube analysis
         script:
-          - |
-            if [ ! -f pr_status.env ]; then
-              echo "PR_DECLINED=false" > pr_status.env
-            fi
-          - cat pr_status.env
-          - source pr_status.env
-          - |
-            if [ "$PR_DECLINED" == "true" ]; then
-              echo "Skipping SonarQube analysis because PR was declined."
-              exit 0
-            fi
           - pipe: sonarsource/sonarqube-scan:1.0.0
             variables:
               SONAR_HOST_URL: ${SONAR_HOST_URL} # Get the value from the repository/workspace variable.
@@ -112,7 +77,6 @@ pipelines:
           - exit 0
     '**':
       - step: *git-police
-      - step: *check-pr-status
       - parallel:
         - step: *make-review
         - step: *build-step
