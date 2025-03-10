@@ -26,7 +26,7 @@ public class AlertProcess extends Action {
       OBContext.setOBContext("100", "42D0EEB1C66F497A90DD526DC597E6F0", "23C59575B9CF467C9620760EB255B389", "0");
       Alert alert = new Alert();
       Role role = OBContext.getOBContext().getRole();
-      alert.setDescription((String) parameters.get("description"));
+      alert.setDescription("Document No: " + parameters.getJSONObject("after").getString("documentno"));
       alert.setAlertRule(OBDal.getInstance().get(AlertRule.class, "57CC65EA1D9C47E9BA20E09771004802"));
       alert.setReferenceSearchKey("");
       alert.setRole(role);

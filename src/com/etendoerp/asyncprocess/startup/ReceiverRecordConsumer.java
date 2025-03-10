@@ -3,6 +3,11 @@ package com.etendoerp.asyncprocess.startup;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -12,10 +17,13 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.Uuid;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.openbravo.dal.core.OBContext;
 
 import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
 import com.etendoerp.asyncprocess.model.AsyncProcessState;
+import com.etendoerp.asyncprocess.retry.RetryPolicy;
 import com.smf.jobs.Action;
 import com.smf.jobs.AsyncAction;
 
@@ -26,7 +34,8 @@ import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 
 /**
- * Class with encapsulates all need object to receive a message, call consumer and response based on result
+ * Clase mejorada que encapsula todos los objetos necesarios para recibir un mensaje,
+ * llamar al consumidor y responder según el resultado, con soporte para reintentos y procesamiento paralelo.
  */
 class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
   private static final Logger logger = LogManager.getLogger();
@@ -39,6 +48,11 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   private final String orgId;
   private final AsyncProcessState targetStatus;
 
+  // Nuevos campos para soporte de configuración avanzada
+  private final RetryPolicy retryPolicy;
+  private final ScheduledExecutorService scheduler;
+  private final Map<String, AtomicInteger> retryAttempts = new ConcurrentHashMap<>();
+
   public ReceiverRecordConsumer(
       String jobId,
       Supplier<Action> actionFactory,
@@ -47,6 +61,22 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       KafkaSender<String, AsyncProcessExecution> kafkaSender,
       String clientId,
       String orgId) {
+    this(jobId, actionFactory, nextTopic, errorTopic, targetStatus, kafkaSender, clientId, orgId, null, null);
+  }
+
+  /**
+   * Constructor extendido con soporte para configuración avanzada
+   */
+  public ReceiverRecordConsumer(
+      String jobId,
+      Supplier<Action> actionFactory,
+      String nextTopic, String errorTopic,
+      AsyncProcessState targetStatus,
+      KafkaSender<String, AsyncProcessExecution> kafkaSender,
+      String clientId,
+      String orgId,
+      RetryPolicy retryPolicy,
+      ScheduledExecutorService scheduler) {
     this.jobId = jobId;
     this.actionFactory = actionFactory;
     this.nextTopic = nextTopic;
@@ -55,52 +85,128 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     this.kafkaSender = kafkaSender;
     this.clientId = clientId;
     this.orgId = orgId;
+    this.retryPolicy = retryPolicy;
+    this.scheduler = scheduler;
   }
 
   @Override
-  public void accept(
-      ReceiverRecord<String, AsyncProcessExecution> receiverRecord) {
+  public void accept(ReceiverRecord<String, AsyncProcessExecution> receiverRecord) {
+    processRecord(receiverRecord, 0);
+  }
+
+  /**
+   * Procesa un registro con soporte para reintentos
+   * @param receiverRecord El registro a procesar
+   * @param attemptNumber El número de intento actual
+   */
+  private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord, int attemptNumber) {
     var value = receiverRecord.value();
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
     responseRecord.setDescription(value.getDescription());
     responseRecord.setAsyncProcessId(value.getAsyncProcessId());
     String log = value.getLog();
+    ReceiverOffset offset = receiverRecord.receiverOffset();
 
+    // Establecer contexto OB si es necesario
+    boolean contextChanged = false;
     try {
-      ReceiverOffset offset = receiverRecord.receiverOffset();
-      logger.info("Received message: topic-partition={} offset={} key={} value={}",
+      if (OBContext.getOBContext() == null || !OBContext.getOBContext().isInAdministratorMode()) {
+        OBContext.setOBContext(clientId, orgId, "0", "0");
+        OBContext.setAdminMode(true);
+        contextChanged = true;
+      }
+
+      logger.info("Received message: topic-partition={} offset={} key={} attempt={}",
           offset.topicPartition(),
           offset.offset(),
           receiverRecord.key(),
-          receiverRecord.value());
+          attemptNumber);
+
       var strParams = receiverRecord.value().getParams();
       var params = new JSONObject(strParams);
-      if (!params.has("jobs_job_id")) {
-        params.put("jobs_job_id", jobId);
+      setupJobParams(params);
+
+      // Añadir información sobre el intento actual si hay reintentos
+      if (attemptNumber > 0) {
+        params.put("retry_attempt", attemptNumber);
+        log = log + "\n" + new Date() + ": Reintento #" + attemptNumber;
       }
-      if (!params.has("client_id")) {
-        params.put("client_id", clientId);
-      }
-      if (!params.has("org_id")) {
-        params.put("org_id", orgId);
-      }
+
       var result = AsyncAction.run(actionFactory, params);
       params.put("message", result.getMessage());
       if (!StringUtils.isEmpty(result.getMessage())) {
         log = log + "\n" + new Date() + ": " + result.getMessage();
       }
+
       responseRecord.setLog(log);
       responseRecord.setParams(params.toString());
       responseRecord.setState(targetStatus);
-      createResponse(nextTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender,
-          responseRecord);
+
+      // Confirmar la recepción solo si no hay más reintentos
+      offset.acknowledge();
+
+      createResponse(nextTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender, responseRecord);
+
     } catch (Exception e) {
-      logger.error("Ann error has ocurred on ReceiverRecordConsumer accept method", e);
-      log = log + new Date() + e.getMessage();
+      logger.error("Error processing message: {}", e.getMessage(), e);
+      handleError(receiverRecord, e, log, responseRecord, attemptNumber);
+    } finally {
+      // Restaurar el contexto OB si fue cambiado
+      if (contextChanged) {
+        OBContext.restorePreviousMode();
+      }
+    }
+  }
+
+  /**
+   * Maneja errores con soporte para reintentos
+   */
+  private void handleError(
+      ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
+      Exception e,
+      String log,
+      AsyncProcessExecution responseRecord,
+      int attemptNumber) {
+
+    // Si hay política de reintentos y aún se permiten más reintentos
+    if (retryPolicy != null && scheduler != null && retryPolicy.shouldRetry(attemptNumber + 1)) {
+      int nextAttempt = attemptNumber + 1;
+      long delay = retryPolicy.getRetryDelay(nextAttempt);
+
+      logger.info("Scheduling retry {} for message {} after {} ms",
+          nextAttempt, receiverRecord.key(), delay);
+
+      // No confirmar el offset para permitir el reintento después
+      scheduler.schedule(() -> processRecord(receiverRecord, nextAttempt), delay, TimeUnit.MILLISECONDS);
+    } else {
+      // No hay más reintentos, enviar al topic de error
+      log = log + "\n" + new Date() + ": " + e.getMessage();
+      if (attemptNumber > 0) {
+        log = log + "\n" + new Date() + ": Max reintentos alcanzados (" + attemptNumber + ")";
+      }
+
       responseRecord.setLog(log);
       responseRecord.setState(AsyncProcessState.ERROR);
-      createResponse(errorTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender,
-          responseRecord);
+
+      // Confirmar la recepción ya que enviaremos al topic de error
+      receiverRecord.receiverOffset().acknowledge();
+
+      createResponse(errorTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender, responseRecord);
+    }
+  }
+
+  /**
+   * Configura los parámetros del job
+   */
+  private void setupJobParams(JSONObject params) throws JSONException {
+    if (!params.has("jobs_job_id")) {
+      params.put("jobs_job_id", jobId);
+    }
+    if (!params.has("client_id")) {
+      params.put("client_id", clientId);
+    }
+    if (!params.has("org_id")) {
+      params.put("org_id", orgId);
     }
   }
 
