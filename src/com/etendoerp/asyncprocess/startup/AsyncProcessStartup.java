@@ -122,7 +122,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
                 });
           })
           .collectMap(Map.Entry::getKey, Map.Entry::getValue)
-          .subscribe(fluxo -> log.info("Created subscribers with advanced configuration {}", flux.keySet()));
+          .subscribe(flux -> log.info("Created subscribers with advanced configuration {}", flux.keySet()));
     } catch (Exception e) {
       log.error("An error has occurred on reactor startup", e);
     }

@@ -55,6 +55,7 @@ repositories {
 dependencies {
     implementation('com.etendoerp:reactor:1.8.0')
     implementation('com.etendoerp.platform:etendo-core:[22.1.0,25.1.0)')
+    implementation('com.google.code.gson:gson:2.10')
 }
 
 test {
