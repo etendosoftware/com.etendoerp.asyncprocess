@@ -3,7 +3,7 @@ package com.etendoerp.asyncprocess.serdes;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-import org.apache.commons.lang.SerializationException;
+import org.apache.commons.lang3.SerializationException;
 import org.apache.kafka.common.serialization.Deserializer;
 
 import com.etendoerp.asyncprocess.model.AsyncProcess;

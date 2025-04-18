@@ -4,7 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import com.google.gson.JsonObject;
-import org.apache.commons.lang.SerializationException;
+
+import org.apache.commons.lang3.SerializationException;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serializer;
 
