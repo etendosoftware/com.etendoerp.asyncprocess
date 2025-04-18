@@ -2,7 +2,7 @@ package com.smf.jobs;
 
 import java.util.function.Supplier;
 
-import org.apache.commons.lang.mutable.MutableBoolean;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.codehaus.jettison.json.JSONObject;
 
 public class AsyncAction {
