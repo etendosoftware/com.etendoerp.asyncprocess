@@ -3,7 +3,7 @@ package com.etendoerp.asyncprocess;
 import java.util.Map;
 import java.util.function.Function;
 
-import org.apache.commons.lang.mutable.MutableBoolean;
+import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.codehaus.jettison.json.JSONObject;
 
 import com.smf.jobs.Action;
