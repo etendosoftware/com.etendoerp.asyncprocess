@@ -17,6 +17,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.Uuid;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.dal.core.OBContext;
@@ -25,6 +26,7 @@ import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
 import com.etendoerp.asyncprocess.model.AsyncProcessState;
 import com.etendoerp.asyncprocess.retry.RetryPolicy;
 import com.smf.jobs.Action;
+import com.smf.jobs.ActionResult;
 import com.smf.jobs.AsyncAction;
 
 import reactor.core.publisher.Flux;
@@ -102,9 +104,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord, int attemptNumber) {
     var value = receiverRecord.value();
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
-    responseRecord.setDescription(value.getDescription());
-    responseRecord.setAsyncProcessId(value.getAsyncProcessId());
-    String log = value.getLog();
+    responseRecord.setDescription(value == null ? StringUtils.EMPTY : value.getDescription());
+    responseRecord.setAsyncProcessId(value == null ? StringUtils.EMPTY : value.getAsyncProcessId());
+    String log = value == null ? StringUtils.EMPTY :value.getLog();
     ReceiverOffset offset = receiverRecord.receiverOffset();
 
     // Establecer contexto OB si es necesario
@@ -122,7 +124,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
           receiverRecord.key(),
           attemptNumber);
 
-      var strParams = receiverRecord.value().getParams();
+      var strParams = receiverRecord.value() == null ? "{}" : receiverRecord.value().getParams();
       var params = new JSONObject(strParams);
       setupJobParams(params);
 
@@ -145,7 +147,12 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       // Confirmar la recepción solo si no hay más reintentos
       offset.acknowledge();
 
-      createResponse(nextTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender, responseRecord);
+      List<String> targets = extractTargetsFromResult(result);
+      if (receiverRecord.value() != null) {
+        for (String tp : targets) {
+          createResponse(tp, receiverRecord.value().getAsyncProcessId(), kafkaSender, responseRecord);
+        }
+      }
 
     } catch (Exception e) {
       logger.error("Error processing message: {}", e.getMessage(), e);
@@ -156,6 +163,39 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
         OBContext.restorePreviousMode();
       }
     }
+  }
+
+  /**
+   * Extracts the topics to send the response to from the ActionResult. The following rules are applied:
+   * <ul>
+   *   <li>The next topic is always included.</li>
+   *   <li>If the message field is a JSONObject with a "next" property, this property is added to the
+   *       list of topics. If the "next" property is a JSONArray, each element is added as a topic.</li>
+   *   <li>If the message field is not a valid JSON, it is ignored.</li>
+   * </ul>
+   * @param result The ActionResult to extract the topics from
+   * @return A list of topics to send the response to
+   */
+  private List<String> extractTargetsFromResult(ActionResult result) {
+    List<String> targets = new ArrayList<>();
+    targets.add(nextTopic);
+
+    try {
+      JSONObject j = new JSONObject(result.getMessage());
+      Object nxt = j.opt("next");
+
+      if (nxt instanceof String && !JSONObject.NULL.equals(nxt)) {
+        targets.add((String) nxt);
+      } else if (nxt instanceof JSONArray arr) {
+        for (int i = 0; i < arr.length(); i++) {
+          targets.add(arr.getString(i));
+        }
+      }
+    } catch (JSONException e) {
+      logger.warn("Invalid JSON in ActionResult message: {}", result.getMessage(), e);
+    }
+
+    return targets;
   }
 
   /**
