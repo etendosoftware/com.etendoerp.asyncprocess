@@ -186,7 +186,8 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
 
       if (nxt instanceof String && !JSONObject.NULL.equals(nxt)) {
         targets.add((String) nxt);
-      } else if (nxt instanceof JSONArray arr) {
+      } else if (nxt instanceof JSONArray) {
+        JSONArray arr = (JSONArray) nxt;
         for (int i = 0; i < arr.length(); i++) {
           targets.add(arr.getString(i));
         }
