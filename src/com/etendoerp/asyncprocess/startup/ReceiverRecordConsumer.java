@@ -148,10 +148,8 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       offset.acknowledge();
 
       List<String> targets = extractTargetsFromResult(result);
-      if (receiverRecord.value() != null) {
-        for (String tp : targets) {
-          createResponse(tp, receiverRecord.value().getAsyncProcessId(), kafkaSender, responseRecord);
-        }
+      for (String tp : targets) {
+        createResponse(tp, kafkaSender, responseRecord);
       }
 
     } catch (Exception e) {
@@ -232,7 +230,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       // Confirmar la recepción ya que enviaremos al topic de error
       receiverRecord.receiverOffset().acknowledge();
 
-      createResponse(errorTopic, receiverRecord.value().getAsyncProcessId(), kafkaSender, responseRecord);
+      createResponse(errorTopic, kafkaSender, responseRecord);
     }
   }
 
@@ -251,7 +249,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     }
   }
 
-  public void createResponse(String topic, String asyncProcessId,
+  public void createResponse(String topic,
       KafkaSender<String, AsyncProcessExecution> kafkaSender,
       AsyncProcessExecution responseRecord) {
     responseRecord.setId(Uuid.randomUuid().toString());
