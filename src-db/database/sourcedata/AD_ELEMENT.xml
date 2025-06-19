@@ -72,4 +72,18 @@
 <!--E43AC6FABD0843909EE173386729BCAA-->  <ISGLOSSARY><![CDATA[N]]></ISGLOSSARY>
 <!--E43AC6FABD0843909EE173386729BCAA--></AD_ELEMENT>
 
+<!--EFC98FB0D91544A69634C8D16CC006E9--><AD_ELEMENT>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <AD_ELEMENT_ID><![CDATA[EFC98FB0D91544A69634C8D16CC006E9]]></AD_ELEMENT_ID>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <AD_CLIENT_ID><![CDATA[0]]></AD_CLIENT_ID>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <AD_ORG_ID><![CDATA[0]]></AD_ORG_ID>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <ISACTIVE><![CDATA[Y]]></ISACTIVE>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <COLUMNNAME><![CDATA[EM_Etap_Cons_Per_Part]]></COLUMNNAME>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <NAME><![CDATA[Create consumer per partition]]></NAME>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <PRINTNAME><![CDATA[Create consumer per partition]]></PRINTNAME>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <DESCRIPTION><![CDATA[This check establishes the creation for consumers for each topic partition.]]></DESCRIPTION>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <HELP><![CDATA[When is set to True, a consumer is created for each topic partition. This is useful when the topic has multiple partitions and you want to ensure that each partition is processed by a separate consumer. If set to False, only one consumer will be created for the topic, which may lead to uneven load distribution across partitions. This setting is particularly relevant for topics with high throughput or when parallel processing is desired.]]></HELP>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <AD_MODULE_ID><![CDATA[B425A28F734444468CA220CA9588C62D]]></AD_MODULE_ID>
+<!--EFC98FB0D91544A69634C8D16CC006E9-->  <ISGLOSSARY><![CDATA[N]]></ISGLOSSARY>
+<!--EFC98FB0D91544A69634C8D16CC006E9--></AD_ELEMENT>
+
 </data>
