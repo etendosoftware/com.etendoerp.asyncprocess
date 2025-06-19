@@ -9,5 +9,10 @@
         <default/>
         <onCreateDefault/>
       </column>
+      <column name="EM_ETAP_CONS_PER_PART" primaryKey="false" required="false" type="CHAR" size="1" autoIncrement="false">
+        <default><![CDATA[N]]></default>
+        <onCreateDefault/>
+      </column>
+      <check name="EM_ETAP_CONS_PER_PART_CHK"><![CDATA[EM_ETAP_CONS_PER_PART = 'Y' OR EM_ETAP_CONS_PER_PART = 'N']]></check>
     </table>
   </database>
