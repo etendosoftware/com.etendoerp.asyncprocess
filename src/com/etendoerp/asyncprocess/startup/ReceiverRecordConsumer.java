@@ -120,7 +120,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     String previousUserId = null;
     try {
       //if no context, set the default context. This is needed in the first message received
-      if (OBContext.getOBContext() == null || OBContext.getOBContext().isInAdministratorMode()) {
+      if (OBContext.getOBContext() == null) {
         OBContext.setOBContext("100", "0", clientId, orgId);
       }
       //always set admin mode
@@ -129,18 +129,18 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       var params = new JSONObject(strParams);
       // if the context info is in message, set it. And remember if it was changed
       if (params.has("params")) {
+        previousUserId = OBContext.getOBContext().getUser().getId();
+        previousRoleId = OBContext.getOBContext().getRole().getId();
         previousClientId = OBContext.getOBContext().getCurrentClient().getId();
         previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
-        previousRoleId = OBContext.getOBContext().getRole().getId();
-        previousUserId = OBContext.getOBContext().getUser().getId();
         contextChanged = true;
         JSONObject paramsObj = new JSONObject(params.getString("params"));
         JSONObject context = paramsObj.getJSONObject("context");
         OBContext.setOBContext(
-            context.optString("user", previousClientId),
-            context.optString("role", previousOrgId),
-            context.optString("client", previousRoleId),
-            context.optString("organization", previousUserId)
+            context.optString("user", previousUserId),
+            context.optString("role", previousRoleId),
+            context.optString("client", previousClientId),
+            context.optString("organization", previousOrgId)
         );
       }
 
