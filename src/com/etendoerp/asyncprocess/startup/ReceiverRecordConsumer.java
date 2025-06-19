@@ -98,24 +98,50 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
 
   /**
    * Procesa un registro con soporte para reintentos
-   * @param receiverRecord El registro a procesar
-   * @param attemptNumber El número de intento actual
+   *
+   * @param receiverRecord
+   *     El registro a procesar
+   * @param attemptNumber
+   *     El número de intento actual
    */
   private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord, int attemptNumber) {
     var value = receiverRecord.value();
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
     responseRecord.setDescription(value == null ? StringUtils.EMPTY : value.getDescription());
-    responseRecord.setAsyncProcessId(value == null ? StringUtils.EMPTY : value.getAsyncProcessId());
-    String log = value == null ? StringUtils.EMPTY :value.getLog();
+    responseRecord.setAsyncProcessId(value == null ? StringUtils.EMPTY : receiverRecord.key());
+    String log = value == null ? StringUtils.EMPTY : value.getLog();
     ReceiverOffset offset = receiverRecord.receiverOffset();
 
-    // Establecer contexto OB si es necesario
+    // Establish OBContext
     boolean contextChanged = false;
+    String previousClientId = null;
+    String previousOrgId = null;
+    String previousRoleId = null;
+    String previousUserId = null;
     try {
-      if (OBContext.getOBContext() == null || !OBContext.getOBContext().isInAdministratorMode()) {
-        OBContext.setOBContext(clientId, orgId, "0", "0");
-        OBContext.setAdminMode(true);
+      //if no context, set the default context. This is needed in the first message received
+      if (OBContext.getOBContext() == null) {
+        OBContext.setOBContext("100", "0", clientId, orgId);
+      }
+      //always set admin mode
+      OBContext.setAdminMode(true);
+      var strParams = receiverRecord.value() == null ? "{}" : receiverRecord.value().getParams();
+      var params = new JSONObject(strParams);
+      // if the context info is in message, set it. And remember if it was changed
+      if (params.has("params")) {
+        previousUserId = OBContext.getOBContext().getUser().getId();
+        previousRoleId = OBContext.getOBContext().getRole().getId();
+        previousClientId = OBContext.getOBContext().getCurrentClient().getId();
+        previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
         contextChanged = true;
+        JSONObject paramsObj = new JSONObject(params.getString("params"));
+        JSONObject context = paramsObj.getJSONObject("context");
+        OBContext.setOBContext(
+            context.optString("user", previousUserId),
+            context.optString("role", previousRoleId),
+            context.optString("client", previousClientId),
+            context.optString("organization", previousOrgId)
+        );
       }
 
       logger.info("Received message: topic-partition={} offset={} key={} attempt={}",
@@ -124,8 +150,6 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
           receiverRecord.key(),
           attemptNumber);
 
-      var strParams = receiverRecord.value() == null ? "{}" : receiverRecord.value().getParams();
-      var params = new JSONObject(strParams);
       setupJobParams(params);
 
       // Añadir información sobre el intento actual si hay reintentos
@@ -156,9 +180,16 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       logger.error("Error processing message: {}", e.getMessage(), e);
       handleError(receiverRecord, e, log, responseRecord, attemptNumber);
     } finally {
-      // Restaurar el contexto OB si fue cambiado
+      // Revert admin mode
+      OBContext.restorePreviousMode();
       if (contextChanged) {
-        OBContext.restorePreviousMode();
+        // Restore old context
+        OBContext.setOBContext(
+            previousUserId,
+            previousRoleId,
+            previousClientId,
+            previousOrgId
+        );
       }
     }
   }
@@ -171,7 +202,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
    *       list of topics. If the "next" property is a JSONArray, each element is added as a topic.</li>
    *   <li>If the message field is not a valid JSON, it is ignored.</li>
    * </ul>
-   * @param result The ActionResult to extract the topics from
+   *
+   * @param result
+   *     The ActionResult to extract the topics from
    * @return A list of topics to send the response to
    */
   private List<String> extractTargetsFromResult(ActionResult result) {
