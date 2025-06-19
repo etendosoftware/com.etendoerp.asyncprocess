@@ -70,6 +70,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static final int DEFAULT_PREFETCH_COUNT = 1;
   private static final int DEFAULT_TOPIC_PARTITIONS = 5;
   public static final String ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS = "asyncprocess.kafka.topic.partitions";
+  public static final String ASYNCPROCESS_KAFKA_BOOTSTRAP_SERVERS = "asyncprocess.kafka.bootstrap.servers";
 
   // Map to maintain schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
@@ -170,7 +171,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
         }
       }
     } catch (Exception e) {
-      log.error("Error checking or creating topic {}: {}", topic, e.getMessage());
+      log.error("Error checking or creating topic {}", topic, e);
     }
   }
 
@@ -449,7 +450,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    */
   private static Properties getKafkaServerConfigProps() {
     var props = new Properties();
-    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+    Properties obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+        obProps.getProperty(ASYNCPROCESS_KAFKA_BOOTSTRAP_SERVERS, "localhost:9092"));
     return props;
   }
 
