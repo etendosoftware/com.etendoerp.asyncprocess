@@ -68,9 +68,10 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static final int DEFAULT_MAX_RETRIES = 3;
   private static final long DEFAULT_RETRY_DELAY = 1000; // ms
   private static final int DEFAULT_PREFETCH_COUNT = 1;
-  private static final int DEFAULT_TOPIC_PARTITIONS = 5;
-  public static final String ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS = "asyncprocess.kafka.topic.partitions";
-  public static final String ASYNCPROCESS_KAFKA_BOOTSTRAP_SERVERS = "asyncprocess.kafka.bootstrap.servers";
+  public static final String KAFKA_TOPIC_PARTITIONS = "kafka.topic.partitions";
+  public static final String KAFKA_URL = "kafka.url";
+  private static final int DEFAULT_KAFKA_TOPIC_PARTITIONS = 5;
+  public static final String DEFAULT_KAFKA_URL = "localhost:9092";
 
   // Map to maintain schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
@@ -141,15 +142,25 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
+  /**
+   * Retrieves the number of partitions for Kafka topics from the Openbravo properties.
+   *
+   * <p>If the `kafka.topic.partitions` property is not defined, the default number of partitions
+   * is returned. If the property is defined but contains an invalid value, a warning is logged
+   * and the default value is used.
+   *
+   * @return The number of partitions as an integer.
+   */
   private static int getNumPartitions() {
-    int numPartitions = DEFAULT_TOPIC_PARTITIONS;
+    int numPartitions = DEFAULT_KAFKA_TOPIC_PARTITIONS;
     Properties obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
-    if (obProps.containsKey(ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS)) {
-      try {
-        numPartitions = Integer.parseInt(obProps.getProperty(ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS));
-      } catch (NumberFormatException e) {
-        log.warn("Invalid number of partitions configured, using default: {}", DEFAULT_TOPIC_PARTITIONS);
-      }
+    if (!obProps.containsKey(KAFKA_TOPIC_PARTITIONS)) {
+      return numPartitions;
+    }
+    try {
+      numPartitions = Integer.parseInt(obProps.getProperty(KAFKA_TOPIC_PARTITIONS));
+    } catch (NumberFormatException e) {
+      log.warn("Invalid number of partitions configured, using default: {}", DEFAULT_KAFKA_TOPIC_PARTITIONS);
     }
     return numPartitions;
   }
@@ -452,7 +463,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     var props = new Properties();
     Properties obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
     props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-        obProps.getProperty(ASYNCPROCESS_KAFKA_BOOTSTRAP_SERVERS, "localhost:9092"));
+        obProps.getProperty(KAFKA_URL, DEFAULT_KAFKA_URL));
     return props;
   }
 
