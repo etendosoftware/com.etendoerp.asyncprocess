@@ -69,11 +69,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       }
       log.info("Found {} async jobs to start", list.size());
       if (!isAsyncJobsEnabled()) {
-        log.info(
+        log.warn(
             "There are async jobs defined, but the Kafka integration is disabled, so the reactor will not connect to any topic until enabled.");
-        log.info(
-            "To enable async jobs, set the property 'kafka.enable' to true in gradle.properties and Openbravo.properties.");
-        log.info(
+        log.warn(
+            "To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
+        log.warn(
             "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
         return;
       }
