@@ -19,6 +19,7 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.hibernate.criterion.Restrictions;
+import org.openbravo.base.session.OBPropertiesProvider;
 import org.openbravo.base.util.OBClassLoader;
 import org.openbravo.base.weld.WeldUtils;
 import org.openbravo.client.application.Process;
@@ -61,7 +62,22 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       OBContext.setOBContext("100", "0", "0", "0");
       var critJob = OBDal.getInstance().createCriteria(Job.class);
       critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
-      Flux.fromStream(critJob.list().stream())
+      List<Job> list = critJob.list();
+      if (list.isEmpty()) {
+        log.info("No async process found, reactor will not connect to any topic until restart.");
+        return;
+      }
+      log.info("Found {} async jobs to start", list.size());
+      if (!isAsyncJobsEnabled()) {
+        log.warn(
+            "There are async jobs defined, but the Kafka integration is disabled, so the reactor will not connect to any topic until enabled.");
+        log.warn(
+            "To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
+        log.warn(
+            "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
+        return;
+      }
+      Flux.fromStream(list.stream())
           .flatMap(job -> {
             var jobLines = job.getJOBSJobLineList();
             jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
@@ -96,6 +112,21 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     } catch (Exception e) {
       log.error("An error has ocurred on reactor startup", e);
     }
+  }
+
+  /**
+   * Checks if asynchronous jobs are enabled based on the Openbravo properties configuration.
+   *
+   * <p>This method retrieves the `kafka.enable` property from the Openbravo properties file
+   * and compares its value to "true" (case-insensitive). If the property is not defined,
+   * it defaults to "false".
+   *
+   * @return `true` if asynchronous jobs are enabled, otherwise `false`.
+   */
+  private boolean isAsyncJobsEnabled() {
+    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+    var kafkaEnabled = obProps.getProperty("kafka.enable", "false");
+    return StringUtils.equalsIgnoreCase(kafkaEnabled, "true");
   }
 
   private AsyncProcessState convertState(String status) {
