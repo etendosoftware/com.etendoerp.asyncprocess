@@ -2,6 +2,7 @@ package com.etendoerp.asyncprocess.startup;
 
 import static com.etendoerp.asyncprocess.util.TopicUtil.createTopic;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -64,7 +65,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static final String DEFAULT_ERROR_SUB_TOPIC = "error";
 
   // Default configuration
-  private static final int DEFAULT_PARALLEL_THREADS = 1;
+  private static final int DEFAULT_PARALLEL_THREADS = 8;
   private static final int DEFAULT_MAX_RETRIES = 3;
   private static final long DEFAULT_RETRY_DELAY = 1000; // ms
   private static final int DEFAULT_PREFETCH_COUNT = 1;
@@ -85,61 +86,74 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       OBContext.setOBContext("100", "0", "0", "0");
       var critJob = OBDal.getInstance().createCriteria(Job.class);
       critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
-      Flux.fromStream(critJob.list().stream())
-          .flatMap(job -> {
-            // Configure or create the scheduler for this job
-            configureJobScheduler(job);
+      Flux.fromStream(critJob.list().stream()).flatMap(job -> {
+        // Configure or create the scheduler for this job
+        configureJobScheduler(job);
 
-            var jobLines = job.getJOBSJobLineList();
-            jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
-            return Flux.fromStream(jobLines.stream())
-                .map(jobLine -> {
-                  // Get the configuration for this job line
-                  AsyncProcessConfig config = getJobLineConfig(job, jobLine);
+        var jobLines = job.getJOBSJobLineList();
+        jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
+        return Flux.fromStream(jobLines.stream()).map(jobLine -> {
+          // Get the configuration for this job line
+          AsyncProcessConfig config = getJobLineConfig(job, jobLine);
 
-                  String topic = calculateCurrentTopic(jobLine, jobLines);
-                  // Validate if the topic exists, if not create it
-                  int numPartitions = getNumPartitions();
+          String topic = calculateCurrentTopic(jobLine, jobLines);
+          // Validate if the topic exists, if not create it
+          int numPartitions = getNumPartitions();
+          existsOrCreateTopic(adminKafka, topic, numPartitions);
 
-                  existsOrCreateTopic(adminKafka, topic, numPartitions);
-                  var receiver = createReceiver(
-                      topic,
-                      job.isEtapIsregularexp(),
-                      config
-                  );
-                  try {
-                    // Create retry policy based on configuration
-                    RetryPolicy retryPolicy = new SimpleRetryPolicy(
-                        config.getMaxRetries(),
-                        config.getRetryDelayMs()
-                    );
+          int k = 1;
+          if (jobLine.getJobsJob().isEtapConsumerPerPartition() || jobLine.isEtapConsumerPerPartition()) {
+            k = numPartitions;
+          }
+          List<Flux<ReceiverRecord<String, AsyncProcessExecution>>> receivers = new ArrayList<>();
+          try {
 
-                    receiver.subscribe(
-                        new ReceiverRecordConsumer(
-                            job.getId(),
-                            createActionFactory(jobLine.getAction()),
-                            calculateNextTopic(jobLine, jobLines),
-                            calculateErrorTopic(job),
-                            convertState(jobLine.getEtapTargetstatus()),
-                            kafkaSender,
-                            job.getClient().getId(),
-                            job.getOrganization().getId(),
-                            retryPolicy,
-                            getJobScheduler(job.getId())
-                        )
-                    );
-                  } catch (Exception e) {
-                    log.error("An error has occurred on job line startup {}", e.getMessage());
-                    e.printStackTrace();
-                  }
-                  return Map.entry(jobLine.getId(), receiver);
-                });
-          })
-          .collectMap(Map.Entry::getKey, Map.Entry::getValue)
-          .subscribe(flux -> log.info("Created subscribers with advanced configuration {}", flux.keySet()));
+            for (int i = 0; i < k; i++) {
+              var receiver = createReceiver(topic, job.isEtapIsregularexp(), config, getGroupId(jobLine));
+
+              // Create retry policy based on configuration
+              RetryPolicy retryPolicy = new SimpleRetryPolicy(config.getMaxRetries(), config.getRetryDelayMs());
+
+              receiver.subscribe(
+                  new ReceiverRecordConsumer(jobLine.getId() + k, createActionFactory(jobLine.getAction()),
+                      calculateNextTopic(jobLine, jobLines), calculateErrorTopic(job),
+                      convertState(jobLine.getEtapTargetstatus()), kafkaSender, job.getClient().getId(),
+                      job.getOrganization().getId(), retryPolicy, getJobScheduler(job.getId())));
+
+              receivers.add(receiver);
+            }
+          } catch (Exception e) {
+            log.error("An error has occurred on job line startup {}", e.getMessage());
+            e.printStackTrace();
+          }
+          return Map.entry(jobLine.getId(), receivers);
+        });
+      }).collectMap(Map.Entry::getKey, Map.Entry::getValue).subscribe(
+          flux -> log.info("Created subscribers with advanced configuration {}", flux.keySet()));
     } catch (Exception e) {
       log.error("An error has occurred on reactor startup", e);
     }
+  }
+
+
+  /**
+   * Generates a unique group ID for a Kafka consumer based on the provided job line.
+   *
+   * <p>The method constructs a group ID string starting with "etendo-ap-group".
+   * If the job line or its parent job is configured to use its own consumer,
+   * the group ID is appended with the job name and, if available, the action name.
+   * The resulting string is converted to lowercase and sanitized by replacing
+   * spaces, underscores, and periods with hyphens.
+   *
+   * @param jobLine
+   *     The `JobLine` object containing job and action details.
+   * @return A sanitized, lowercase group ID string.
+   */
+  private static String getGroupId(JobLine jobLine) {
+    var sb = new StringBuilder();
+    sb.append("etendo-ap-group");
+    sb.append("-").append(jobLine.getJobsJob().getName());
+    return sb.toString().toLowerCase().replace(" ", "-").replace("_", "-").replace(".", "-");
   }
 
   /**
@@ -169,8 +183,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     try {
       if (!adminKafka.listTopics().names().get().contains(topic)) {
         log.info("Creating topic {}", topic);
-        adminKafka.createTopics(Collections.singletonList(
-            new org.apache.kafka.clients.admin.NewTopic(topic, numPartitions, (short) 1)));
+        adminKafka.createTopics(
+            Collections.singletonList(new org.apache.kafka.clients.admin.NewTopic(topic, numPartitions, (short) 1)));
       } else {
         log.info("Topic {} already exists", topic);
         var topicDescription = adminKafka.describeTopics(Collections.singletonList(topic)).all().get();
@@ -219,10 +233,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    */
   private int getJobParallelThreads(Job job) {
     try {
-      String threadsStr = job.get("etapParallelThreads") != null ?
-          job.get("etapParallelThreads").toString() : null;
-      return StringUtils.isEmpty(threadsStr) ?
-          DEFAULT_PARALLEL_THREADS : Integer.parseInt(threadsStr);
+      String threadsStr = job.get("etapParallelThreads") != null ? job.get("etapParallelThreads").toString() : null;
+      return StringUtils.isEmpty(threadsStr) ? DEFAULT_PARALLEL_THREADS : Integer.parseInt(threadsStr);
     } catch (Exception e) {
       log.warn("Error reading parallel threads configuration for job {}, using default", job.getId());
       return DEFAULT_PARALLEL_THREADS;
@@ -242,30 +254,26 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     AsyncProcessConfig config = new AsyncProcessConfig();
 
     try {
-      String retriesStr = jobLine.get("etapMaxRetries") != null ?
-          jobLine.get("etapMaxRetries").toString() : null;
-      config.setMaxRetries(StringUtils.isEmpty(retriesStr) ?
-          DEFAULT_MAX_RETRIES : Integer.parseInt(retriesStr));
+      String retriesStr = jobLine.get("etapMaxRetries") != null ? jobLine.get("etapMaxRetries").toString() : null;
+      config.setMaxRetries(StringUtils.isEmpty(retriesStr) ? DEFAULT_MAX_RETRIES : Integer.parseInt(retriesStr));
     } catch (Exception e) {
       log.warn("Error reading max retries for job line {}, using default", jobLine.getId());
       config.setMaxRetries(DEFAULT_MAX_RETRIES);
     }
 
     try {
-      String delayStr = jobLine.get("etapRetryDelayMs") != null ?
-          jobLine.get("etapRetryDelayMs").toString() : null;
-      config.setRetryDelayMs(StringUtils.isEmpty(delayStr) ?
-          DEFAULT_RETRY_DELAY : Long.parseLong(delayStr));
+      String delayStr = jobLine.get("etapRetryDelayMs") != null ? jobLine.get("etapRetryDelayMs").toString() : null;
+      config.setRetryDelayMs(StringUtils.isEmpty(delayStr) ? DEFAULT_RETRY_DELAY : Long.parseLong(delayStr));
     } catch (Exception e) {
       log.warn("Error reading retry delay for job line {}, using default", jobLine.getId());
       config.setRetryDelayMs(DEFAULT_RETRY_DELAY);
     }
 
     try {
-      String prefetchStr = jobLine.get("etapPrefetchCount") != null ?
-          jobLine.get("etapPrefetchCount").toString() : null;
-      config.setPrefetchCount(StringUtils.isEmpty(prefetchStr) ?
-          DEFAULT_PREFETCH_COUNT : Integer.parseInt(prefetchStr));
+      String prefetchStr = jobLine.get("etapPrefetchCount") != null ? jobLine.get(
+          "etapPrefetchCount").toString() : null;
+      config.setPrefetchCount(
+          StringUtils.isEmpty(prefetchStr) ? DEFAULT_PREFETCH_COUNT : Integer.parseInt(prefetchStr));
     } catch (Exception e) {
       log.warn("Error reading prefetch count for job line {}, using default", jobLine.getId());
       config.setPrefetchCount(DEFAULT_PREFETCH_COUNT);
@@ -334,9 +342,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return Error topic name
    */
   private String calculateErrorTopic(Job job) {
-    return StringUtils.isEmpty(job.getEtapErrortopic()) ?
-        createTopic(job, DEFAULT_ERROR_SUB_TOPIC) :
-        job.getEtapErrortopic();
+    return StringUtils.isEmpty(job.getEtapErrortopic()) ? createTopic(job,
+        DEFAULT_ERROR_SUB_TOPIC) : job.getEtapErrortopic();
   }
 
   /**
@@ -354,10 +361,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     String nextTopic = jobLine.getEtapTargettopic();
     if (StringUtils.isEmpty(nextTopic)) {
       var position = jobLines.indexOf(jobLine);
-      nextTopic = createTopic(job,
-          (position < jobLines.size() - 1) ?
-              jobLines.get(position + 1).getLineNo().toString() :
-              DEFAULT_RESULT_SUB_TOPIC);
+      nextTopic = createTopic(job, (position < jobLines.size() - 1) ? jobLines.get(
+          position + 1).getLineNo().toString() : DEFAULT_RESULT_SUB_TOPIC);
     }
     return nextTopic;
   }
@@ -374,9 +379,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private String calculateCurrentTopic(JobLine jobLine, List<JobLine> jobLines) {
     var position = jobLines.indexOf(jobLine);
     var job = jobLine.getJobsJob();
-    String topic = position == 0 ?
-        job.getEtapInitialTopic() :
-        jobLines.get(position - 1).getEtapTargettopic();
+    String topic = position == 0 ? job.getEtapInitialTopic() : jobLines.get(position - 1).getEtapTargettopic();
     if (StringUtils.isEmpty(topic)) {
       topic = createTopic(job, jobLine.getLineNo());
     }
@@ -392,15 +395,15 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    *     Whether the topic is a regular expression
    * @param config
    *     Configuration options
+   * @param groupId
    * @return Flux of ReceiverRecord instances
    */
-  public Flux<ReceiverRecord<String, AsyncProcessExecution>> createReceiver(
-      String topic, boolean isRegExp, AsyncProcessConfig config) {
+  public Flux<ReceiverRecord<String, AsyncProcessExecution>> createReceiver(String topic, boolean isRegExp,
+      AsyncProcessConfig config, String groupId) {
     Map<String, Object> props = propsToHashMap(getKafkaServerConfigProps());
-    props.put(ConsumerConfig.GROUP_ID_CONFIG, "etendo-ap-group");
+    props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
     props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
-        AsyncProcessExecutionDeserializer.class.getName());
+    props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, AsyncProcessExecutionDeserializer.class.getName());
 
     // Configure prefetch count
     props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
@@ -461,7 +464,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    */
   private static Properties getKafkaServerConfigProps() {
     var props = new Properties();
-    Properties obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
     props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
         obProps.getProperty(KAFKA_URL, DEFAULT_KAFKA_URL));
     return props;
