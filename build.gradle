@@ -16,6 +16,14 @@ configurations {
     moduleDependencyContainer
 }
 
+sourceSets {
+    main {
+        resources {
+            srcDirs("etendo-resources")
+        }
+    }
+}
+
 publishing {
     publications {
         "com.etendoerp.asyncprocess"(MavenPublication) {
