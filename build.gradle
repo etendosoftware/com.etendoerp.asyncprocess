@@ -7,7 +7,7 @@
 */
 
 group          = "com.etendoerp"
-version        = "2.0.2"
+version        = "2.1.0"
 description    = "Etendo Async Processes"
 ext.artifact   = "asyncprocess"
 ext.repository = "https://maven.pkg.github.com/etendosoftware/com.etendoerp.platform.extensions"
@@ -61,8 +61,8 @@ repositories {
 * Ex: implementation "com.sun.mail:javax.mail:1.6.2"
 */
 dependencies {
-    implementation('com.etendoerp:reactor:2.0.1')
-    implementation('com.etendoerp.platform:etendo-core:[25.1.0,25.2.0)')
+    implementation('com.etendoerp:reactor:2.1.0')
+    implementation('com.etendoerp.platform:etendo-core:[25.1.0,25.3.0)')
     implementation('com.google.code.gson:gson:2.10')
 }
 
