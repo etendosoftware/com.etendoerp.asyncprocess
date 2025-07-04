@@ -3,6 +3,7 @@ package com.etendoerp.asyncprocess.serdes;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
+import com.google.gson.JsonObject;
 import org.apache.commons.lang.SerializationException;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serializer;
@@ -34,7 +35,14 @@ public class AsyncProcessExecutionDeserializer implements Deserializer<AsyncProc
       if (data == null) {
         return null;
       }
-      return objectMapper.readValue(new String(data, StandardCharsets.UTF_8), AsyncProcessExecution.class);
+      JsonObject jsonObject = new JsonObject();
+      jsonObject.addProperty("id", "0");
+      jsonObject.addProperty("asyncProcessId", "4448");
+      jsonObject.addProperty("log", "0");
+      jsonObject.addProperty("description", "0");
+      jsonObject.addProperty("params", new String(data, StandardCharsets.UTF_8));
+      String newData = jsonObject.toString();
+      return objectMapper.readValue(newData, AsyncProcessExecution.class);
     } catch (Exception e) {
       throw new SerializationException("Error when deserializing byte[] to MessageDto");
     }

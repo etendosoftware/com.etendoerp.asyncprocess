@@ -61,7 +61,10 @@ repositories {
 * Ex: implementation "com.sun.mail:javax.mail:1.6.2"
 */
 dependencies {
+    implementation('com.google.code.gson:gson:2.10')
+
     implementation('com.etendoerp:reactor:1.9.1')
+
     implementation('com.etendoerp.platform:etendo-core:[22.1.0,25.1.0)')
 }
 
