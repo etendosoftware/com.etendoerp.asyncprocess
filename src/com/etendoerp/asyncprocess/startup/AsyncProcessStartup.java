@@ -60,13 +60,13 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static final String DEFAULT_RESULT_SUB_TOPIC = "result";
   private static final String DEFAULT_ERROR_SUB_TOPIC = "error";
 
-  // Configuración por defecto
+  // Default configuration
   private static final int DEFAULT_PARALLEL_THREADS = 1;
   private static final int DEFAULT_MAX_RETRIES = 3;
   private static final long DEFAULT_RETRY_DELAY = 1000; // ms
   private static final int DEFAULT_PREFETCH_COUNT = 1;
 
-  // Mapa para mantener los schedulers por job
+  // Map to hold schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
 
   @Override
@@ -94,14 +94,14 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       }
       Flux.fromStream(list.stream())
           .flatMap(job -> {
-            // Configurar o crear el scheduler para este job
+            // Configure or create scheduler for this job
             configureJobScheduler(job);
 
             var jobLines = job.getJOBSJobLineList();
             jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
             return Flux.fromStream(jobLines.stream())
                 .map(jobLine -> {
-                  // Obtener la configuración para esta línea de trabajo
+                  // Get configuration for this job line
                   AsyncProcessConfig config = getJobLineConfig(job, jobLine);
 
                   var receiver = createReceiver(
@@ -110,7 +110,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
                       config
                   );
                   try {
-                    // Crear política de reintentos basada en la configuración
+                    // Create retry policy based on configuration
                     RetryPolicy retryPolicy = new SimpleRetryPolicy(
                         config.getMaxRetries(),
                         config.getRetryDelayMs()
@@ -145,8 +145,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Configura el Scheduler para un job específico
-   * @param job El job para el cual configurar el scheduler
+   * Configures the scheduler for a specific job
+   * @param job The job for which to configure the scheduler
    */
   private void configureJobScheduler(Job job) {
     int threads = getJobParallelThreads(job);
@@ -156,18 +156,18 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Obtiene el scheduler para un job específico
-   * @param jobId ID del job
-   * @return ScheduledExecutorService configurado para el job
+   * Gets the scheduler for a specific job
+   * @param jobId Job ID
+   * @return Configured ScheduledExecutorService for the job
    */
   private ScheduledExecutorService getJobScheduler(String jobId) {
     return jobSchedulers.get(jobId);
   }
 
   /**
-   * Obtiene el número de hilos paralelos configurados para un job
-   * @param job El job a consultar
-   * @return Número de hilos configurados o el valor por defecto
+   * Gets the number of parallel threads configured for a job
+   * @param job The job to consult
+   * @return Configured thread count or the default value
    */
   private int getJobParallelThreads(Job job) {
     try {
@@ -182,15 +182,15 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Obtiene la configuración completa para una línea de job
-   * @param job El job padre
-   * @param jobLine La línea de job
-   * @return Configuración para la línea de job
+   * Gets the complete configuration for a job line
+   * @param job Parent job
+   * @param jobLine Job line
+   * @return Configuration for the job line
    */
   private AsyncProcessConfig getJobLineConfig(Job job, JobLine jobLine) {
     AsyncProcessConfig config = new AsyncProcessConfig();
 
-    // Configurar número de reintentos
+    // Configure retry count
     try {
       String retriesStr = jobLine.get("etapMaxRetries") != null ?
           jobLine.get("etapMaxRetries").toString() : null;
@@ -201,7 +201,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       config.setMaxRetries(DEFAULT_MAX_RETRIES);
     }
 
-    // Configurar delay entre reintentos
+    // Configure delay between retries
     try {
       String delayStr = jobLine.get("etapRetryDelayMs") != null ?
           jobLine.get("etapRetryDelayMs").toString() : null;
@@ -212,7 +212,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       config.setRetryDelayMs(DEFAULT_RETRY_DELAY);
     }
 
-    // Configurar prefetch count (cuántos mensajes procesar a la vez)
+    // Configure prefetch count (how many messages to process at once)
     try {
       String prefetchStr = jobLine.get("etapPrefetchCount") != null ?
           jobLine.get("etapPrefetchCount").toString() : null;
@@ -370,7 +370,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
         AsyncProcessExecutionDeserializer.class.getName());
 
-    // Configurar prefetch
+    // Configure prefetch
     props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
 
     var receiverOptions = ReceiverOptions.<String, AsyncProcessExecution>create(props);
@@ -401,7 +401,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Método para limpiar los recursos del servicio
+   * Method to clean service resources
    */
   public void shutdown() {
     log.info("Shutting down AsyncProcessStartup...");

@@ -1,8 +1,8 @@
 package com.etendoerp.asyncprocess.retry;
 
 /**
- * Implementación simple de política de reintentos con un número máximo
- * de intentos y un tiempo de espera fijo entre reintentos
+ * Simple implementation of a retry policy with a maximum number
+ * of attempts and a fixed wait time between retries.
  */
 public class SimpleRetryPolicy implements RetryPolicy {
   private final int maxRetries;
