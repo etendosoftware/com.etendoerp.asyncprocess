@@ -72,7 +72,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   public static final String KAFKA_TOPIC_PARTITIONS = "kafka.topic.partitions";
   public static final String KAFKA_URL = "kafka.url";
   private static final int DEFAULT_KAFKA_TOPIC_PARTITIONS = 5;
-  public static final String DEFAULT_KAFKA_URL = "localhost:9092";
+  public static final String DEFAULT_KAFKA_URL = "localhost:29092";
 
   // Map to maintain schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
