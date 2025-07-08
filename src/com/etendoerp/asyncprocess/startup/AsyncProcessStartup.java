@@ -73,6 +73,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   public static final String KAFKA_URL = "kafka.url";
   private static final int DEFAULT_KAFKA_TOPIC_PARTITIONS = 5;
   public static final String DEFAULT_KAFKA_URL = "localhost:29092";
+  private static final String DEFAULT_KAFKA_URL_TOMCAT_IN_DOCKER = "kafka:9092";
 
   // Map to maintain schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
@@ -80,9 +81,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   @Override
   public void init() {
     log.info("Etendo Reactor Startup with Advanced Configuration");
-    Properties props = getKafkaServerConfigProps();
+    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+    String kafkaHost = getKafkaHost(obProps);
+    Properties props = getKafkaServerConfigProps(kafkaHost);
     try (AdminClient adminKafka = AdminClient.create(props)) {
-      KafkaSender<String, AsyncProcessExecution> kafkaSender = crateSender();
+      KafkaSender<String, AsyncProcessExecution> kafkaSender = crateSender(kafkaHost);
       OBContext.setOBContext("100", "0", "0", "0");
       var critJob = OBDal.getInstance().createCriteria(Job.class);
       critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
@@ -124,7 +127,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
           try {
 
             for (int i = 0; i < k; i++) {
-              var receiver = createReceiver(topic, job.isEtapIsregularexp(), config, getGroupId(jobLine));
+              var receiver = createReceiver(topic, job.isEtapIsregularexp(), config, getGroupId(jobLine), kafkaHost);
 
               // Create retry policy based on configuration
               RetryPolicy retryPolicy = new SimpleRetryPolicy(config.getMaxRetries(), config.getRetryDelayMs());
@@ -295,7 +298,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
 
     return config;
-    }
+  }
+
   /**
    * Checks if asynchronous jobs are enabled based on the Openbravo properties configuration.
    *
@@ -307,8 +311,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    */
   private boolean isAsyncJobsEnabled() {
     var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
-    var kafkaEnabled = obProps.getProperty("kafka.enable", "false");
-    return StringUtils.equalsIgnoreCase(kafkaEnabled, "true");
+    return propInTrue(obProps, "kafka.enable");
   }
 
   private AsyncProcessState convertState(String status) {
@@ -428,8 +431,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return Flux of ReceiverRecord instances
    */
   public Flux<ReceiverRecord<String, AsyncProcessExecution>> createReceiver(String topic, boolean isRegExp,
-      AsyncProcessConfig config, String groupId) {
-    Map<String, Object> props = propsToHashMap(getKafkaServerConfigProps());
+      AsyncProcessConfig config, String groupId, String kafkaHost) {
+    Map<String, Object> props = propsToHashMap(getKafkaServerConfigProps(kafkaHost));
     props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
     props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
     props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, AsyncProcessExecutionDeserializer.class.getName());
@@ -451,12 +454,18 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Creates a global sender to publish responses.
+   * Creates a Kafka sender to publish responses.
    *
-   * @return KafkaSender instance
+   * <p>This method initializes a Kafka sender with the necessary configuration properties
+   * for producing messages. It sets up the client ID, acknowledgment mode, and serializers
+   * for both keys and values. The sender is configured using the provided Kafka host URL.
+   *
+   * @param kafkaHost
+   *     The Kafka host URL to connect to.
+   * @return A `KafkaSender` instance configured for publishing messages.
    */
-  public KafkaSender<String, AsyncProcessExecution> crateSender() {
-    Map<String, Object> propsProducer = propsToHashMap(getKafkaServerConfigProps());
+  public KafkaSender<String, AsyncProcessExecution> crateSender(String kafkaHost) {
+    Map<String, Object> propsProducer = propsToHashMap(getKafkaServerConfigProps(kafkaHost));
     // Kafka properties already include the bootstrap server
     propsProducer.put(ProducerConfig.CLIENT_ID_CONFIG, "asyncprocess-producer");
     propsProducer.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -492,14 +501,60 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * configuration to "localhost:9092". This configuration is used to connect to
    * the Kafka server.
    *
+   * @param kafkaHost
    * @return A `Properties` object containing the Kafka server configuration.
    */
-  private static Properties getKafkaServerConfigProps() {
+  private static Properties getKafkaServerConfigProps(String kafkaHost) {
     var props = new Properties();
-    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
-    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-        obProps.getProperty(KAFKA_URL, DEFAULT_KAFKA_URL));
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaHost);
     return props;
+  }
+
+  /**
+   * Retrieves the Kafka host URL based on the provided Openbravo properties.
+   *
+   * <p>This method checks for specific keys in the `Properties` object to determine
+   * the appropriate Kafka host URL to use. The priority order is as follows:
+   * 1. If the `KAFKA_URL` key exists, its value is returned.
+   * 2. If the `docker_` key exists, the default Kafka URL for Tomcat in Docker is returned.
+   * 3. If neither key exists, the default Kafka URL is returned.
+   *
+   * @param obProps
+   *     The `Properties` object containing configuration values.
+   * @return The Kafka host URL as a `String`.
+   */
+  private static String getKafkaHost(Properties obProps) {
+    // Check if the `KAFKA_URL` key exists in the properties
+    if (obProps.containsKey(KAFKA_URL)) {
+      log.debug("Using Kafka URL from properties: {}", obProps.getProperty(KAFKA_URL));
+      return obProps.getProperty(KAFKA_URL);
+    }
+    // Check if the `docker_` key exists in the properties
+    if (propInTrue(obProps, "docker_com.etendoerp.tomcat")) {
+      log.debug("Using default Kafka URL for Tomcat in Docker: {}", DEFAULT_KAFKA_URL_TOMCAT_IN_DOCKER);
+      return DEFAULT_KAFKA_URL_TOMCAT_IN_DOCKER;
+    }
+    // Return the default Kafka URL if no specific keys are found
+    log.debug("Using default Kafka URL: {}", DEFAULT_KAFKA_URL);
+    return DEFAULT_KAFKA_URL;
+  }
+
+  /**
+   * Checks if a given property in the `Properties` object is set to "true".
+   *
+   * <p>This method verifies if the specified property key exists in the `Properties` object
+   * and whether its value (case-insensitive) is equal to "true". If the property does not exist,
+   * it defaults to "false".
+   *
+   * @param obProps
+   *     The `Properties` object containing configuration values.
+   * @param propKey
+   *     The key of the property to check.
+   * @return `true` if the property exists and its value is "true", otherwise `false`.
+   */
+  private static boolean propInTrue(Properties obProps, String propKey) {
+    return obProps.containsKey(propKey) &&
+        StringUtils.equalsIgnoreCase(obProps.getProperty(propKey, "false"), "true");
   }
 
   /**
