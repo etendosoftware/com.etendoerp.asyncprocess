@@ -1,7 +1,7 @@
 package com.etendoerp.asyncprocess.config;
 
 /**
- * Clase que encapsula la configuración avanzada para procesos asíncronos
+ * Class that encapsulates advanced configuration for asynchronous processes
  */
 public class AsyncProcessConfig {
   private int maxRetries = 3;

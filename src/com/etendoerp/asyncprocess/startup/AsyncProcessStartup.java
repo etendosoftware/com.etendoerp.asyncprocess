@@ -437,6 +437,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     // Configure prefetch count
     props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
 
+    // Configure prefetch
+    props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
+
     var receiverOptions = ReceiverOptions.<String, AsyncProcessExecution>create(props);
     if (isRegExp) {
       receiverOptions = receiverOptions.subscription(Pattern.compile(topic));

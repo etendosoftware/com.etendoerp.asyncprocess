@@ -36,8 +36,8 @@ import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 
 /**
- * Clase mejorada que encapsula todos los objetos necesarios para recibir un mensaje,
- * llamar al consumidor y responder según el resultado, con soporte para reintentos y procesamiento paralelo.
+ * Enhanced class that encapsulates all necessary objects to receive a message,
+ * call the consumer, and respond based on the result, with support for retries and parallel processing.
  */
 class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
   private static final Logger logger = LogManager.getLogger();
@@ -50,7 +50,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   private final String orgId;
   private final AsyncProcessState targetStatus;
 
-  // Nuevos campos para soporte de configuración avanzada
+  // New fields for advanced configuration support
   private final RetryPolicy retryPolicy;
   private final ScheduledExecutorService scheduler;
   private final Map<String, AtomicInteger> retryAttempts = new ConcurrentHashMap<>();
@@ -67,7 +67,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   }
 
   /**
-   * Constructor extendido con soporte para configuración avanzada
+   * Extended constructor with support for advanced configuration
    */
   public ReceiverRecordConsumer(
       String jobId,
@@ -97,12 +97,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   }
 
   /**
-   * Procesa un registro con soporte para reintentos
-   *
-   * @param receiverRecord
-   *     El registro a procesar
-   * @param attemptNumber
-   *     El número de intento actual
+   * Processes a record with retry support
+   * @param receiverRecord The record to process
+   * @param attemptNumber The current attempt number
    */
   private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord, int attemptNumber) {
     var value = receiverRecord.value();
@@ -168,7 +165,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       responseRecord.setParams(params.toString());
       responseRecord.setState(targetStatus);
 
-      // Confirmar la recepción solo si no hay más reintentos
+      // Acknowledge the message only if no more retries are needed
       offset.acknowledge();
 
       List<String> targets = extractTargetsFromResult(result);
@@ -231,7 +228,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   }
 
   /**
-   * Maneja errores con soporte para reintentos
+   * Handles errors with retry support
    */
   private void handleError(
       ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
@@ -240,7 +237,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       AsyncProcessExecution responseRecord,
       int attemptNumber) {
 
-    // Si hay política de reintentos y aún se permiten más reintentos
+    // If retry policy exists and more retries are allowed
     if (retryPolicy != null && scheduler != null && retryPolicy.shouldRetry(attemptNumber + 1)) {
       int nextAttempt = attemptNumber + 1;
       long delay = retryPolicy.getRetryDelay(nextAttempt);
@@ -260,7 +257,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       responseRecord.setLog(log);
       responseRecord.setState(AsyncProcessState.ERROR);
 
-      // Confirmar la recepción ya que enviaremos al topic de error
+      // Acknowledge the message since we will send to error topic
       receiverRecord.receiverOffset().acknowledge();
 
       createResponse(errorTopic, kafkaSender, responseRecord);
@@ -268,7 +265,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   }
 
   /**
-   * Configura los parámetros del job
+   * Sets job parameters
    */
   private void setupJobParams(JSONObject params) throws JSONException {
     if (!params.has("jobs_job_id")) {
