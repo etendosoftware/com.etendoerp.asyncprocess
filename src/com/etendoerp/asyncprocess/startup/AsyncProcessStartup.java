@@ -112,7 +112,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
         jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
         return Flux.fromStream(jobLines.stream()).map(jobLine -> {
           // Get the configuration for this job line
-          AsyncProcessConfig config = getJobLineConfig(job, jobLine);
+          AsyncProcessConfig config = getJobLineConfig(jobLine);
 
           String topic = calculateCurrentTopic(jobLine, jobLines);
           // Validate if the topic exists, if not create it
@@ -215,6 +215,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       }
     } catch (Exception e) {
       log.error("Error checking or creating topic {}", topic, e);
+      Thread.currentThread().interrupt();
     }
   }
 
@@ -262,13 +263,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   /**
    * Retrieves full configuration for a job line.
    *
-   * @param job
-   *     The parent job
    * @param jobLine
    *     The job line
    * @return Configured AsyncProcessConfig
    */
-  private AsyncProcessConfig getJobLineConfig(Job job, JobLine jobLine) {
+  private AsyncProcessConfig getJobLineConfig(JobLine jobLine) {
     AsyncProcessConfig config = new AsyncProcessConfig();
 
     try {
@@ -428,6 +427,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @param config
    *     Configuration options
    * @param groupId
+   *     Consumer group ID
+   * @param kafkaHost
+   *     The Kafka host URL to connect to.
    * @return Flux of ReceiverRecord instances
    */
   public Flux<ReceiverRecord<String, AsyncProcessExecution>> createReceiver(String topic, boolean isRegExp,
@@ -526,8 +528,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static String getKafkaHost(Properties obProps) {
     // Check if the `KAFKA_URL` key exists in the properties
     if (obProps.containsKey(KAFKA_URL)) {
-      log.debug("Using Kafka URL from properties: {}", obProps.getProperty(KAFKA_URL));
-      return obProps.getProperty(KAFKA_URL);
+      String kafkaUrl = obProps.getProperty(KAFKA_URL);
+      log.debug("Using Kafka URL from properties: {}", kafkaUrl);
+      return kafkaUrl;
     }
     // Check if the `docker_` key exists in the properties
     if (propInTrue(obProps, "docker_com.etendoerp.tomcat")) {
@@ -570,6 +573,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
         }
       } catch (InterruptedException e) {
         scheduler.shutdownNow();
+        Thread.currentThread().interrupt();
       }
     }
   }
