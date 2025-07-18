@@ -98,12 +98,13 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       if (!isAsyncJobsEnabled()) {
         log.warn(
             "There are async jobs defined, but the Kafka integration is disabled, so the reactor will not connect to any topic until enabled.");
-        log.warn(
-            "To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
+        log.warn("To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
         log.warn(
             "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
         return;
       }
+      //Create the Kafka Connect topics
+      createKafkaConnectTopics(obProps, adminKafka);
       Flux.fromStream(list.stream()).flatMap(job -> {
         // Configure or create the scheduler for this job
         configureJobScheduler(job);
@@ -153,6 +154,44 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
+  /**
+   * Creates Kafka Connect topics based on the provided properties.
+   *
+   * <p>This method retrieves a list of table names from the kafka.connect.tables property
+   * in the provided Properties object. For each table name, it ensures the name starts
+   * with "public." and constructs a topic name in the format "default.{table}". It then
+   * checks if the topic exists or creates it with the specified number of partitions.
+   *
+   * @param props
+   *     The Properties object containing Kafka configuration values.
+   * @param adminKafka
+   *     The AdminClient instance used to manage Kafka topics.
+   */
+  private void createKafkaConnectTopics(Properties props, AdminClient adminKafka) {
+    // Retrieve the list of table names from the properties
+    var tableNames = props.getProperty("kafka.connect.tables", null);
+    if (StringUtils.isEmpty(tableNames)) {
+      return; // Exit if no table names are provided
+    }
+
+    // Split the table names into an array
+    String[] tables = tableNames.split(",");
+    for (String table : tables) {
+      // Ensure the table name starts with "public."
+      if (!StringUtils.startsWithIgnoreCase(table, "public.")) {
+        table = "public." + table;
+      }
+
+      // Construct the topic name
+      String topic = "default." + table;
+
+      // Retrieve the number of partitions for the topic
+      int numPartitions = getNumPartitions();
+
+      // Check if the topic exists or create it
+      existsOrCreateTopic(adminKafka, topic, numPartitions);
+    }
+  }
 
   /**
    * Generates a unique group ID for a Kafka consumer based on the provided job line.
@@ -556,8 +595,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    * @return `true` if the property exists and its value is "true", otherwise `false`.
    */
   private static boolean propInTrue(Properties obProps, String propKey) {
-    return obProps.containsKey(propKey) &&
-        StringUtils.equalsIgnoreCase(obProps.getProperty(propKey, "false"), "true");
+    return obProps.containsKey(propKey) && StringUtils.equalsIgnoreCase(obProps.getProperty(propKey, "false"), "true");
   }
 
   /**
