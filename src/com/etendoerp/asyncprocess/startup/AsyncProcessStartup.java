@@ -83,6 +83,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       OBContext.setOBContext("100", "0", "0", "0");
       var critJob = OBDal.getInstance().createCriteria(Job.class);
       critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
+
+      var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+
+      //Create the Kafka Connect topics
+      createKafkaConnectTopics(obProps, adminKafka);
       Flux.fromStream(critJob.list().stream())
           .flatMap(job -> {
             // Configure or create the scheduler for this job
@@ -137,6 +142,45 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
           .subscribe(flux -> log.info("Created subscribers with advanced configuration {}", flux.keySet()));
     } catch (Exception e) {
       log.error("An error has occurred on reactor startup", e);
+    }
+  }
+
+  /**
+   * Creates Kafka Connect topics based on the provided properties.
+   *
+   * <p>This method retrieves a list of table names from the kafka.connect.tables property
+   * in the provided Properties object. For each table name, it ensures the name starts
+   * with "public." and constructs a topic name in the format "default.{table}". It then
+   * checks if the topic exists or creates it with the specified number of partitions.
+   *
+   * @param props
+   *     The Properties object containing Kafka configuration values.
+   * @param adminKafka
+   *     The AdminClient instance used to manage Kafka topics.
+   */
+  private void createKafkaConnectTopics(Properties props, AdminClient adminKafka) {
+    // Retrieve the list of table names from the properties
+    var tableNames = props.getProperty("kafka.connect.tables", null);
+    if (StringUtils.isEmpty(tableNames)) {
+      return; // Exit if no table names are provided
+    }
+
+    // Split the table names into an array
+    String[] tables = tableNames.split(",");
+    for (String table : tables) {
+      // Ensure the table name starts with "public."
+      if (!StringUtils.startsWithIgnoreCase(table, "public.")) {
+        table = "public." + table;
+      }
+
+      // Construct the topic name
+      String topic = "default." + table;
+
+      // Retrieve the number of partitions for the topic
+      int numPartitions = getNumPartitions();
+
+      // Check if the topic exists or create it
+      existsOrCreateTopic(adminKafka, topic, numPartitions);
     }
   }
 
