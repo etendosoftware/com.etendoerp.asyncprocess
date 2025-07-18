@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -14,7 +15,9 @@ import java.util.regex.Pattern;
 
 import javax.enterprise.context.ApplicationScoped;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewPartitions;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -50,7 +53,7 @@ import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 
 /**
- * Startup process called to initialize defined workflows with advanced configuration
+ * Startup process called to initialize defined workflows with advanced configuration.
  */
 @ApplicationScoped
 @ComponentProvider.Qualifier(AsyncProcessStartup.ASYNC_PROCESS_STARTUP)
@@ -65,47 +68,40 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private static final int DEFAULT_MAX_RETRIES = 3;
   private static final long DEFAULT_RETRY_DELAY = 1000; // ms
   private static final int DEFAULT_PREFETCH_COUNT = 1;
+  private static final int DEFAULT_TOPIC_PARTITIONS = 5;
+  public static final String ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS = "asyncprocess.kafka.topic.partitions";
 
-  // Map to hold schedulers per job
+  // Map to maintain schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
 
   @Override
   public void init() {
     log.info("Etendo Reactor Startup with Advanced Configuration");
-    try {
+    Properties props = getKafkaServerConfigProps();
+    try (AdminClient adminKafka = AdminClient.create(props)) {
       KafkaSender<String, AsyncProcessExecution> kafkaSender = crateSender();
       OBContext.setOBContext("100", "0", "0", "0");
       var critJob = OBDal.getInstance().createCriteria(Job.class);
       critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
-      List<Job> list = critJob.list();
-      if (list.isEmpty()) {
-        log.info("No async process found, reactor will not connect to any topic until restart.");
-        return;
-      }
-      log.info("Found {} async jobs to start", list.size());
-      if (!isAsyncJobsEnabled()) {
-        log.warn(
-            "There are async jobs defined, but the Kafka integration is disabled, so the reactor will not connect to any topic until enabled.");
-        log.warn(
-            "To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
-        log.warn(
-            "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
-        return;
-      }
-      Flux.fromStream(list.stream())
+      Flux.fromStream(critJob.list().stream())
           .flatMap(job -> {
-            // Configure or create scheduler for this job
+            // Configure or create the scheduler for this job
             configureJobScheduler(job);
 
             var jobLines = job.getJOBSJobLineList();
             jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
             return Flux.fromStream(jobLines.stream())
                 .map(jobLine -> {
-                  // Get configuration for this job line
+                  // Get the configuration for this job line
                   AsyncProcessConfig config = getJobLineConfig(job, jobLine);
 
+                  String topic = calculateCurrentTopic(jobLine, jobLines);
+                  // Validate if the topic exists, if not create it
+                  int numPartitions = getNumPartitions();
+
+                  existsOrCreateTopic(adminKafka, topic, numPartitions);
                   var receiver = createReceiver(
-                      calculateCurrentTopic(jobLine, jobLines),
+                      topic,
                       job.isEtapIsregularexp(),
                       config
                   );
@@ -144,9 +140,45 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
+  private static int getNumPartitions() {
+    int numPartitions = DEFAULT_TOPIC_PARTITIONS;
+    Properties obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+    if (obProps.containsKey(ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS)) {
+      try {
+        numPartitions = Integer.parseInt(obProps.getProperty(ASYNCPROCESS_KAFKA_TOPIC_PARTITIONS));
+      } catch (NumberFormatException e) {
+        log.warn("Invalid number of partitions configured, using default: {}", DEFAULT_TOPIC_PARTITIONS);
+      }
+    }
+    return numPartitions;
+  }
+
+  private void existsOrCreateTopic(AdminClient adminKafka, String topic, int numPartitions) {
+    try {
+      if (!adminKafka.listTopics().names().get().contains(topic)) {
+        log.info("Creating topic {}", topic);
+        adminKafka.createTopics(Collections.singletonList(
+            new org.apache.kafka.clients.admin.NewTopic(topic, numPartitions, (short) 1)));
+      } else {
+        log.info("Topic {} already exists", topic);
+        var topicDescription = adminKafka.describeTopics(Collections.singletonList(topic)).all().get();
+        if (topicDescription.get(topic).partitions().size() < numPartitions) {
+          log.info("Increasing partitions for topic {} to {}", topic, numPartitions);
+          adminKafka.createPartitions(Collections.singletonMap(topic, NewPartitions.increaseTo(numPartitions)));
+        } else {
+          log.info("Topic {} already has sufficient partitions", topic);
+        }
+      }
+    } catch (Exception e) {
+      log.error("Error checking or creating topic {}: {}", topic, e.getMessage());
+    }
+  }
+
   /**
-   * Configures the scheduler for a specific job
-   * @param job The job for which to configure the scheduler
+   * Configures the scheduler for a specific job.
+   *
+   * @param job
+   *     The job to configure the scheduler for
    */
   private void configureJobScheduler(Job job) {
     int threads = getJobParallelThreads(job);
@@ -156,8 +188,10 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Gets the scheduler for a specific job
-   * @param jobId Job ID
+   * Gets the scheduler for a specific job.
+   *
+   * @param jobId
+   *     ID of the job
    * @return Configured ScheduledExecutorService for the job
    */
   private ScheduledExecutorService getJobScheduler(String jobId) {
@@ -165,9 +199,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Gets the number of parallel threads configured for a job
-   * @param job The job to consult
-   * @return Configured thread count or the default value
+   * Retrieves the number of parallel threads configured for a job.
+   *
+   * @param job
+   *     The job to check
+   * @return Number of threads or default value
    */
   private int getJobParallelThreads(Job job) {
     try {
@@ -182,15 +218,17 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Gets the complete configuration for a job line
-   * @param job Parent job
-   * @param jobLine Job line
-   * @return Configuration for the job line
+   * Retrieves full configuration for a job line.
+   *
+   * @param job
+   *     The parent job
+   * @param jobLine
+   *     The job line
+   * @return Configured AsyncProcessConfig
    */
   private AsyncProcessConfig getJobLineConfig(Job job, JobLine jobLine) {
     AsyncProcessConfig config = new AsyncProcessConfig();
 
-    // Configure retry count
     try {
       String retriesStr = jobLine.get("etapMaxRetries") != null ?
           jobLine.get("etapMaxRetries").toString() : null;
@@ -201,7 +239,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       config.setMaxRetries(DEFAULT_MAX_RETRIES);
     }
 
-    // Configure delay between retries
     try {
       String delayStr = jobLine.get("etapRetryDelayMs") != null ?
           jobLine.get("etapRetryDelayMs").toString() : null;
@@ -212,7 +249,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
       config.setRetryDelayMs(DEFAULT_RETRY_DELAY);
     }
 
-    // Configure prefetch count (how many messages to process at once)
     try {
       String prefetchStr = jobLine.get("etapPrefetchCount") != null ?
           jobLine.get("etapPrefetchCount").toString() : null;
@@ -224,21 +260,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
 
     return config;
-  }
-
-  /**
-   * Checks if asynchronous jobs are enabled based on the Openbravo properties configuration.
-   *
-   * <p>This method retrieves the `kafka.enable` property from the Openbravo properties file
-   * and compares its value to "true" (case-insensitive). If the property is not defined,
-   * it defaults to "false".
-   *
-   * @return `true` if asynchronous jobs are enabled, otherwise `false`.
-   */
-  private boolean isAsyncJobsEnabled() {
-    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
-    var kafkaEnabled = obProps.getProperty("kafka.enable", "false");
-    return StringUtils.equalsIgnoreCase(kafkaEnabled, "true");
   }
 
   private AsyncProcessState convertState(String status) {
@@ -267,12 +288,13 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Method called to create a consumer based on configured actions
+   * Method called to create a consumer based on configured actions.
    *
    * @param action
-   *     in which we need to create a consumer
-   * @return a consumer called dynamically based on configuration
+   *     Process configuration to create the consumer for
+   * @return Supplier of an Action implementation
    * @throws ClassNotFoundException
+   *     If the class is not found
    */
   private Supplier<Action> createActionFactory(Process action) throws ClassNotFoundException {
     var handler = OBClassLoader.getInstance().loadClass(action.getJavaClassName());
@@ -293,11 +315,11 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Calculate current topic based on configuration
+   * Calculates the error topic based on configuration.
    *
    * @param job
    *     Global job
-   * @return error topic
+   * @return Error topic name
    */
   private String calculateErrorTopic(Job job) {
     return StringUtils.isEmpty(job.getEtapErrortopic()) ?
@@ -306,14 +328,14 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Calculate the subject to send the response. First, check if it is configured. If not, it is generated based on the
-   * next line. If the current one is the last one, the default result topic is used.
+   * Calculates the topic to send the response to. First, checks if it is configured. If not, it is generated based on the
+   * next line. If the current one is the last, the default result topic is used.
    *
    * @param jobLine
    *     Current job line
    * @param jobLines
-   *     all lines
-   * @return calculated topic
+   *     All job lines
+   * @return Calculated topic name
    */
   private String calculateNextTopic(JobLine jobLine, List<JobLine> jobLines) {
     var job = jobLine.getJobsJob();
@@ -329,13 +351,13 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Method to calculate topic to subscribe
+   * Calculates the topic to subscribe to.
    *
    * @param jobLine
-   *     current job line
+   *     Current job line
    * @param jobLines
-   *     all job lines
-   * @return calculated topic
+   *     All job lines
+   * @return Calculated topic name
    */
   private String calculateCurrentTopic(JobLine jobLine, List<JobLine> jobLines) {
     var position = jobLines.indexOf(jobLine);
@@ -350,27 +372,25 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Create a receiver based on configuration with advanced options
+   * Creates a receiver based on advanced configuration options.
    *
    * @param topic
-   *     topic to subscribe
+   *     Topic to subscribe to
    * @param isRegExp
-   *     indicates if the indicated topic is a regular expression
+   *     Whether the topic is a regular expression
    * @param config
-   *     advanced configuration options
-   * @return Created receiver
+   *     Configuration options
+   * @return Flux of ReceiverRecord instances
    */
   public Flux<ReceiverRecord<String, AsyncProcessExecution>> createReceiver(
       String topic, boolean isRegExp, AsyncProcessConfig config) {
-    Map<String, Object> props = new HashMap<>();
-
-    props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+    Map<String, Object> props = propsToHashMap(getKafkaServerConfigProps());
     props.put(ConsumerConfig.GROUP_ID_CONFIG, "etendo-ap-group");
     props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
     props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
         AsyncProcessExecutionDeserializer.class.getName());
 
-    // Configure prefetch
+    // Configure prefetch count
     props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
 
     var receiverOptions = ReceiverOptions.<String, AsyncProcessExecution>create(props);
@@ -384,13 +404,13 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Create a global sender, needed to publish responses
+   * Creates a global sender to publish responses.
    *
-   * @return Generated sender
+   * @return KafkaSender instance
    */
   public KafkaSender<String, AsyncProcessExecution> crateSender() {
-    Map<String, Object> propsProducer = new HashMap<>();
-    propsProducer.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+    Map<String, Object> propsProducer = propsToHashMap(getKafkaServerConfigProps());
+    // Kafka properties already include the bootstrap server
     propsProducer.put(ProducerConfig.CLIENT_ID_CONFIG, "asyncprocess-producer");
     propsProducer.put(ProducerConfig.ACKS_CONFIG, "all");
     propsProducer.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
@@ -401,7 +421,40 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Method to clean service resources
+   * Converts a `Properties` object into a `Map<String, Object>`.
+   *
+   * <p>This method iterates over all property names in the given `Properties` object
+   * and adds each property name and its corresponding value to a `HashMap`.
+   *
+   * @param properties
+   *     The `Properties` object to be converted.
+   * @return A `Map<String, Object>` containing all the properties and their values.
+   */
+  private Map<String, Object> propsToHashMap(Properties properties) {
+    Map<String, Object> map = new HashMap<>();
+    for (String name : properties.stringPropertyNames()) {
+      map.put(name, properties.getProperty(name));
+    }
+    return map;
+  }
+
+  /**
+   * Retrieves the Kafka server configuration properties.
+   *
+   * <p>This method creates a `Properties` object and sets the `bootstrap.servers`
+   * configuration to "localhost:9092". This configuration is used to connect to
+   * the Kafka server.
+   *
+   * @return A `Properties` object containing the Kafka server configuration.
+   */
+  private static Properties getKafkaServerConfigProps() {
+    var props = new Properties();
+    props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:29092");
+    return props;
+  }
+
+  /**
+   * Method to clean up service resources.
    */
   public void shutdown() {
     log.info("Shutting down AsyncProcessStartup...");
