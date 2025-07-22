@@ -21,7 +21,7 @@
         <default><![CDATA[N]]></default>
         <onCreateDefault/>
       </column>
-      <check name="EM_ETAP_CONS_PER_PART_CHK"><![CDATA[EM_ETAP_CONS_PER_PART = 'Y' OR EM_ETAP_CONS_PER_PART = 'N']]></check>
+      <check name="EM_ETAP_CONS_PER_PART_JB_CHK"><![CDATA[EM_ETAP_CONS_PER_PART = 'Y' OR EM_ETAP_CONS_PER_PART = 'N']]></check>
       <check name="EM_ETAP_ISASYNC_CHK"><![CDATA[EM_ETAP_ISASYNC = 'Y' OR EM_ETAP_ISASYNC = 'N']]></check>
       <check name="EM_ETAP_ISREGULAREXP_CHK"><![CDATA[EM_ETAP_ISREGULAREXP = 'Y' OR EM_ETAP_ISREGULAREXP = 'N']]></check>
     </table>
