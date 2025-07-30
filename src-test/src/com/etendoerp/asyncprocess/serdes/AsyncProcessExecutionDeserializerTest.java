@@ -1,5 +1,7 @@
 package com.etendoerp.asyncprocess.serdes;
 
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.TEST_DATA;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.TEST_TOPIC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -58,7 +60,7 @@ class AsyncProcessExecutionDeserializerTest {
     try (MockedConstruction<ObjectMapper> ignored = mockConstruction(ObjectMapper.class,
         (mock, context) -> {
           try {
-            byte[] expectedBytes = "test data".getBytes();
+            byte[] expectedBytes = TEST_DATA.getBytes();
             when(mock.writeValueAsBytes(any(AsyncProcessExecution.class)))
                 .thenReturn(expectedBytes);
           } catch (Exception e) {
@@ -68,9 +70,9 @@ class AsyncProcessExecutionDeserializerTest {
 
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
-      byte[] result = newDeserializer.serialize("test-topic", testExecution);
+      byte[] result = newDeserializer.serialize(TEST_TOPIC, testExecution);
 
-      assertEquals("test data", new String(result));
+      assertEquals(TEST_DATA, new String(result));
     }
   }
 
@@ -94,7 +96,7 @@ class AsyncProcessExecutionDeserializerTest {
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
       SerializationException exception = assertThrows(SerializationException.class,
-          () -> newDeserializer.serialize("test-topic", testExecution));
+          () -> newDeserializer.serialize(TEST_TOPIC, testExecution));
 
       assertEquals("Error serializing instance to byte[]", exception.getMessage());
     }
@@ -123,7 +125,7 @@ class AsyncProcessExecutionDeserializerTest {
 
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
-      AsyncProcessExecution result = newDeserializer.deserialize("test-topic", testData);
+      AsyncProcessExecution result = newDeserializer.deserialize(TEST_TOPIC, testData);
 
       assertNotNull(result);
       assertEquals(expectedExecution, result);
@@ -136,7 +138,7 @@ class AsyncProcessExecutionDeserializerTest {
    */
   @Test
   void testDeserializeWithNullData() {
-    AsyncProcessExecution result = deserializer.deserialize("test-topic", null);
+    AsyncProcessExecution result = deserializer.deserialize(TEST_TOPIC, null);
 
     assertNull(result);
   }
@@ -148,7 +150,7 @@ class AsyncProcessExecutionDeserializerTest {
   @Test
   void testDeserializeThrowsException() {
     // Given
-    byte[] testData = "test data".getBytes();
+    byte[] testData = TEST_DATA.getBytes();
 
     try (MockedConstruction<ObjectMapper> ignored = mockConstruction(ObjectMapper.class,
         (mock, context) -> {
@@ -163,7 +165,7 @@ class AsyncProcessExecutionDeserializerTest {
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
       SerializationException exception = assertThrows(SerializationException.class,
-          () -> newDeserializer.deserialize("test-topic", testData));
+          () -> newDeserializer.deserialize(TEST_TOPIC, testData));
 
       assertEquals("Error when deserializing byte[] to MessageDto", exception.getMessage());
     }
@@ -191,7 +193,7 @@ class AsyncProcessExecutionDeserializerTest {
       String testParams = "test parameters";
       byte[] testData = testParams.getBytes(StandardCharsets.UTF_8);
 
-      AsyncProcessExecution result = newDeserializer.deserialize("test-topic", testData);
+      AsyncProcessExecution result = newDeserializer.deserialize(TEST_TOPIC, testData);
 
       assertNotNull(result);
     }
@@ -207,7 +209,7 @@ class AsyncProcessExecutionDeserializerTest {
     try (MockedConstruction<ObjectMapper> ignored = mockConstruction(ObjectMapper.class,
         (mock, context) -> {
           try {
-            byte[] expectedBytes = "test data".getBytes();
+            byte[] expectedBytes = TEST_DATA.getBytes();
             when(mock.writeValueAsBytes(any(AsyncProcessExecution.class)))
                 .thenReturn(expectedBytes);
           } catch (Exception e) {
@@ -216,9 +218,9 @@ class AsyncProcessExecutionDeserializerTest {
         })) {
 
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
-      AsyncProcessExecution testExecution = new AsyncProcessExecution();
+      AsyncProcessExecution localExecution = new AsyncProcessExecution();
 
-      byte[] result = newDeserializer.serialize("test-topic", testExecution);
+      byte[] result = newDeserializer.serialize(TEST_TOPIC, localExecution);
 
       assertNotNull(result);
     }
@@ -275,7 +277,7 @@ class AsyncProcessExecutionDeserializerTest {
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
       byte[] testData = "test params".getBytes(StandardCharsets.UTF_8);
 
-      AsyncProcessExecution result = newDeserializer.deserialize("test-topic", testData);
+      AsyncProcessExecution result = newDeserializer.deserialize(TEST_TOPIC, testData);
 
       assertNotNull(result);
     }
@@ -299,7 +301,7 @@ class AsyncProcessExecutionDeserializerTest {
 
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
-      byte[] result = newDeserializer.serialize("test-topic", null);
+      byte[] result = newDeserializer.serialize(TEST_TOPIC, null);
 
       assertEquals("null", new String(result));
     }
@@ -326,7 +328,7 @@ class AsyncProcessExecutionDeserializerTest {
 
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
-      AsyncProcessExecution result = newDeserializer.deserialize("test-topic", emptyData);
+      AsyncProcessExecution result = newDeserializer.deserialize(TEST_TOPIC, emptyData);
 
       assertNotNull(result);
     }
@@ -359,7 +361,7 @@ class AsyncProcessExecutionDeserializerTest {
 
       AsyncProcessExecutionDeserializer newDeserializer = new AsyncProcessExecutionDeserializer();
 
-      AsyncProcessExecution result = newDeserializer.deserialize("test-topic", testData);
+      AsyncProcessExecution result = newDeserializer.deserialize(TEST_TOPIC, testData);
 
       assertNotNull(result);
     }
@@ -375,7 +377,7 @@ class AsyncProcessExecutionDeserializerTest {
     AsyncProcessExecutionDeserializer realDeserializer = new AsyncProcessExecutionDeserializer();
     AsyncProcessExecution originalExecution = new AsyncProcessExecution();
 
-    byte[] serialized = realDeserializer.serialize("test-topic", originalExecution);
+    byte[] serialized = realDeserializer.serialize(TEST_TOPIC, originalExecution);
 
     assertNotNull(serialized);
     // Verify it's valid JSON by checking it starts with '{' and ends with '}'
@@ -396,7 +398,7 @@ class AsyncProcessExecutionDeserializerTest {
     String testParams = "real test parameters";
     byte[] testData = testParams.getBytes(StandardCharsets.UTF_8);
 
-    AsyncProcessExecution result = realDeserializer.deserialize("test-topic", testData);
+    AsyncProcessExecution result = realDeserializer.deserialize(TEST_TOPIC, testData);
 
     assertNotNull(result);
   }

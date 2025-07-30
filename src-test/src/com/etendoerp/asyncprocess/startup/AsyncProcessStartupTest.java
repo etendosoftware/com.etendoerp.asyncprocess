@@ -1,5 +1,16 @@
 package com.etendoerp.asyncprocess.startup;
 
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.DOCKER_TOMCAT_NAME;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.ETAP_PARALLEL_THREADS;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.GET_KAFKA_HOST_METHOD;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.GET_NUM_PARTITIONS_METHOD;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.JOB_PARTITION_ID;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.JOB_SCHEDULERS;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_ENABLE_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_ENABLE_VALUE;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_PARTITIONS_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_URL_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_URL_VALUE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -162,7 +173,7 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testInitNoAsyncJobsFound() {
-    when(mockProperties.getProperty("kafka.url")).thenReturn("localhost:29092");
+    when(mockProperties.getProperty(KAFKA_URL_KEY)).thenReturn(KAFKA_URL_VALUE);
     when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
     when(mockCriteria.add(any())).thenReturn(mockCriteria);
     when(mockCriteria.list()).thenReturn(Collections.emptyList());
@@ -181,9 +192,9 @@ class AsyncProcessStartupTest {
   @Test
   void testInitWithAsyncJobsDisabled() {
     List<Job> jobs = Arrays.asList(mockJob);
-    when(mockProperties.getProperty("kafka.url")).thenReturn("localhost:29092");
-    when(mockProperties.containsKey("kafka.enable")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.enable", "false")).thenReturn("false");
+    when(mockProperties.getProperty(KAFKA_URL_KEY)).thenReturn(KAFKA_URL_VALUE);
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn(KAFKA_ENABLE_VALUE);
     when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
     when(mockCriteria.add(any())).thenReturn(mockCriteria);
     when(mockCriteria.list()).thenReturn(jobs);
@@ -203,16 +214,16 @@ class AsyncProcessStartupTest {
   @Test
   void testInitWithEnabledAsyncJobs() throws Exception {
     List<JobLine> jobLines = Arrays.asList(mockJobLine);
-    when(mockProperties.getProperty("kafka.url")).thenReturn("localhost:29092");
-    when(mockProperties.containsKey("kafka.enable")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.enable", "false")).thenReturn("true");
-    when(mockProperties.getProperty("kafka.topic.partitions")).thenReturn("5");
+    when(mockProperties.getProperty(KAFKA_URL_KEY)).thenReturn(KAFKA_URL_VALUE);
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("true");
+    when(mockProperties.getProperty(KAFKA_PARTITIONS_KEY)).thenReturn("5");
     when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
     when(mockCriteria.add(any())).thenReturn(mockCriteria);
     when(mockCriteria.list()).thenReturn(Arrays.asList(mockJob));
 
     when(mockJob.getJOBSJobLineList()).thenReturn(jobLines);
-    when(mockJob.getId()).thenReturn("job-123");
+    when(mockJob.getId()).thenReturn(JOB_PARTITION_ID);
     when(mockJob.getName()).thenReturn("Test Job");
     when(mockJob.isEtapIsregularexp()).thenReturn(false);
     when(mockJob.isEtapConsumerPerPartition()).thenReturn(false);
@@ -258,7 +269,7 @@ class AsyncProcessStartupTest {
   @Test
   void testCreateKafkaConnectTopics() throws Exception {
     when(mockProperties.getProperty("kafka.connect.tables", null)).thenReturn("table1,public.table2,table3");
-    when(mockProperties.getProperty("kafka.topic.partitions")).thenReturn("3");
+    when(mockProperties.getProperty(KAFKA_PARTITIONS_KEY)).thenReturn("3");
 
     KafkaFuture<Set<String>> topicsFuture = mock(KafkaFuture.class);
     when(mockListTopicsResult.names()).thenReturn(topicsFuture);
@@ -299,9 +310,9 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetNumPartitionsDefault() throws Exception {
-    when(mockProperties.containsKey("kafka.topic.partitions")).thenReturn(false);
+    when(mockProperties.containsKey(KAFKA_PARTITIONS_KEY)).thenReturn(false);
 
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("getNumPartitions");
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_NUM_PARTITIONS_METHOD);
     method.setAccessible(true);
     int result = (int) method.invoke(null);
 
@@ -316,10 +327,10 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetNumPartitionsConfigured() throws Exception {
-    when(mockProperties.containsKey("kafka.topic.partitions")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.topic.partitions")).thenReturn("10");
+    when(mockProperties.containsKey(KAFKA_PARTITIONS_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_PARTITIONS_KEY)).thenReturn("10");
 
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("getNumPartitions");
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_NUM_PARTITIONS_METHOD);
     method.setAccessible(true);
     int result = (int) method.invoke(null);
 
@@ -334,10 +345,10 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetNumPartitionsInvalidNumber() throws Exception {
-    when(mockProperties.containsKey("kafka.topic.partitions")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.topic.partitions")).thenReturn("invalid");
+    when(mockProperties.containsKey(KAFKA_PARTITIONS_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_PARTITIONS_KEY)).thenReturn("invalid");
 
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("getNumPartitions");
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_NUM_PARTITIONS_METHOD);
     method.setAccessible(true);
     int result = (int) method.invoke(null);
 
@@ -410,18 +421,18 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testConfigureJobScheduler() throws Exception {
-    when(mockJob.getId()).thenReturn("job-123");
-    when(mockJob.get("etapParallelThreads")).thenReturn("4");
+    when(mockJob.getId()).thenReturn(JOB_PARTITION_ID);
+    when(mockJob.get(ETAP_PARALLEL_THREADS)).thenReturn("4");
 
     Method method = AsyncProcessStartup.class.getDeclaredMethod("configureJobScheduler", Job.class);
     method.setAccessible(true);
     method.invoke(asyncProcessStartup, mockJob);
 
-    Field field = AsyncProcessStartup.class.getDeclaredField("jobSchedulers");
+    Field field = AsyncProcessStartup.class.getDeclaredField(JOB_SCHEDULERS);
     field.setAccessible(true);
     Map<String, ScheduledExecutorService> schedulers = (Map<String, ScheduledExecutorService>) field.get(asyncProcessStartup);
-    assertTrue(schedulers.containsKey("job-123"));
-    assertNotNull(schedulers.get("job-123"));
+    assertTrue(schedulers.containsKey(JOB_PARTITION_ID));
+    assertNotNull(schedulers.get(JOB_PARTITION_ID));
   }
 
   /**
@@ -432,10 +443,10 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetJobScheduler() throws Exception {
-    String jobId = "job-123";
+    String jobId = JOB_PARTITION_ID;
     ScheduledExecutorService mockScheduler = mock(ScheduledExecutorService.class);
 
-    Field field = AsyncProcessStartup.class.getDeclaredField("jobSchedulers");
+    Field field = AsyncProcessStartup.class.getDeclaredField(JOB_SCHEDULERS);
     field.setAccessible(true);
     Map<String, ScheduledExecutorService> schedulers = new HashMap<>();
     schedulers.put(jobId, mockScheduler);
@@ -456,7 +467,7 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetJobParallelThreadsDefault() throws Exception {
-    when(mockJob.get("etapParallelThreads")).thenReturn(null);
+    when(mockJob.get(ETAP_PARALLEL_THREADS)).thenReturn(null);
 
     Method method = AsyncProcessStartup.class.getDeclaredMethod("getJobParallelThreads", Job.class);
     method.setAccessible(true);
@@ -473,7 +484,7 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetJobParallelThreadsConfigured() throws Exception {
-    when(mockJob.get("etapParallelThreads")).thenReturn("12");
+    when(mockJob.get(ETAP_PARALLEL_THREADS)).thenReturn("12");
 
     Method method = AsyncProcessStartup.class.getDeclaredMethod("getJobParallelThreads", Job.class);
     method.setAccessible(true);
@@ -532,8 +543,8 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testIsAsyncJobsEnabledTrue() throws Exception {
-    when(mockProperties.containsKey("kafka.enable")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.enable", "false")).thenReturn("true");
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("true");
 
     Method method = AsyncProcessStartup.class.getDeclaredMethod("isAsyncJobsEnabled");
     method.setAccessible(true);
@@ -550,8 +561,8 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testIsAsyncJobsEnabledFalse() throws Exception {
-    when(mockProperties.containsKey("kafka.enable")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.enable", "false")).thenReturn("false");
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn(KAFKA_ENABLE_VALUE);
 
     Method method = AsyncProcessStartup.class.getDeclaredMethod("isAsyncJobsEnabled");
     method.setAccessible(true);
@@ -662,14 +673,14 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetKafkaHostDefault() throws Exception {
-    when(mockProperties.containsKey("kafka.url")).thenReturn(false);
-    when(mockProperties.containsKey("docker_com.etendoerp.tomcat")).thenReturn(false);
+    when(mockProperties.containsKey(KAFKA_URL_KEY)).thenReturn(false);
+    when(mockProperties.containsKey(DOCKER_TOMCAT_NAME)).thenReturn(false);
 
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("getKafkaHost", Properties.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_KAFKA_HOST_METHOD, Properties.class);
     method.setAccessible(true);
     String result = (String) method.invoke(null, mockProperties);
 
-    assertEquals("localhost:29092", result);
+    assertEquals(KAFKA_URL_VALUE, result);
   }
 
   /**
@@ -680,10 +691,10 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetKafkaHostFromProperties() throws Exception {
-    when(mockProperties.containsKey("kafka.url")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.url")).thenReturn("custom:9092");
+    when(mockProperties.containsKey(KAFKA_URL_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_URL_KEY)).thenReturn("custom:9092");
 
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("getKafkaHost", Properties.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_KAFKA_HOST_METHOD, Properties.class);
     method.setAccessible(true);
     String result = (String) method.invoke(null, mockProperties);
 
@@ -698,11 +709,11 @@ class AsyncProcessStartupTest {
    */
   @Test
   void testGetKafkaHostDocker() throws Exception {
-    when(mockProperties.containsKey("kafka.url")).thenReturn(false);
-    when(mockProperties.containsKey("docker_com.etendoerp.tomcat")).thenReturn(true);
-    when(mockProperties.getProperty("docker_com.etendoerp.tomcat", "false")).thenReturn("true");
+    when(mockProperties.containsKey(KAFKA_URL_KEY)).thenReturn(false);
+    when(mockProperties.containsKey(DOCKER_TOMCAT_NAME)).thenReturn(true);
+    when(mockProperties.getProperty(DOCKER_TOMCAT_NAME, KAFKA_ENABLE_VALUE)).thenReturn("true");
 
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("getKafkaHost", Properties.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_KAFKA_HOST_METHOD, Properties.class);
     method.setAccessible(true);
     String result = (String) method.invoke(null, mockProperties);
 
@@ -720,10 +731,10 @@ class AsyncProcessStartupTest {
     ScheduledExecutorService mockScheduler = mock(ScheduledExecutorService.class);
     when(mockScheduler.awaitTermination(anyLong(), any())).thenReturn(true);
 
-    Field field = AsyncProcessStartup.class.getDeclaredField("jobSchedulers");
+    Field field = AsyncProcessStartup.class.getDeclaredField(JOB_SCHEDULERS);
     field.setAccessible(true);
     Map<String, ScheduledExecutorService> schedulers = new HashMap<>();
-    schedulers.put("job-123", mockScheduler);
+    schedulers.put(JOB_PARTITION_ID, mockScheduler);
     field.set(asyncProcessStartup, schedulers);
 
     asyncProcessStartup.shutdown();
@@ -743,10 +754,10 @@ class AsyncProcessStartupTest {
     ScheduledExecutorService mockScheduler = mock(ScheduledExecutorService.class);
     when(mockScheduler.awaitTermination(anyLong(), any())).thenReturn(false);
 
-    Field field = AsyncProcessStartup.class.getDeclaredField("jobSchedulers");
+    Field field = AsyncProcessStartup.class.getDeclaredField(JOB_SCHEDULERS);
     field.setAccessible(true);
     Map<String, ScheduledExecutorService> schedulers = new HashMap<>();
-    schedulers.put("job-123", mockScheduler);
+    schedulers.put(JOB_PARTITION_ID, mockScheduler);
     field.set(asyncProcessStartup, schedulers);
 
     asyncProcessStartup.shutdown();

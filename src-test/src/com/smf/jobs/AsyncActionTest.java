@@ -1,5 +1,7 @@
 package com.smf.jobs;
 
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.ASSERT_RESULT_NOT_NULL;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.ASSERT_SHOULD_RETURN_MOCKED_RESULT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -45,6 +47,13 @@ public class AsyncActionTest {
   private JSONObject testParams;
   private AutoCloseable mocks;
 
+  /**
+   * Sets up the test environment before each test execution.
+   * Initializes mock objects and test parameters.
+   *
+   * @throws Exception
+   *     if an error occurs during mock initialization or JSON object creation
+   */
   @BeforeEach
   public void setUp() throws Exception {
     mocks = MockitoAnnotations.openMocks(this);
@@ -54,6 +63,13 @@ public class AsyncActionTest {
     testParams.put("numericKey", 123);
   }
 
+  /**
+   * Cleans up resources after each test execution.
+   * Closes any open mocks to prevent resource leaks.
+   *
+   * @throws Exception
+   *     if an error occurs while closing mocks
+   */
   @AfterEach
   public void tearDown() throws Exception {
     if (mocks != null) {
@@ -61,6 +77,13 @@ public class AsyncActionTest {
     }
   }
 
+  /**
+   * Tests the happy path of the AsyncAction.run method.
+   * Verifies that the method returns the expected ActionResult when provided with valid parameters.
+   *
+   * @throws JSONException
+   *     if there is an error creating or manipulating JSON objects
+   */
   @Test
   public void testRunHappyPath() throws JSONException {
     JSONObject expectedParams = new JSONObject();
@@ -72,8 +95,8 @@ public class AsyncActionTest {
 
     ActionResult result = AsyncAction.run(mockActionFactory, expectedParams);
 
-    assertNotNull(result, "Result should not be null");
-    assertEquals(mockActionResult, result, "Should return the mocked result");
+    assertNotNull(result, ASSERT_RESULT_NOT_NULL);
+    assertEquals(mockActionResult, result, ASSERT_SHOULD_RETURN_MOCKED_RESULT);
 
     verify(mockActionFactory, times(1)).get();
 
@@ -85,6 +108,10 @@ public class AsyncActionTest {
     assertFalse(capturedBoolean.booleanValue(), "MutableBoolean should be false initially");
   }
 
+  /**
+   * Tests the AsyncAction.run method with null parameters.
+   * Verifies that the method handles null JSON parameters correctly and returns the expected ActionResult.
+   */
   @Test
   public void testRunWithNullParams() {
     JSONObject nullParams = null;
@@ -95,13 +122,17 @@ public class AsyncActionTest {
 
     ActionResult result = AsyncAction.run(mockActionFactory, null);
 
-    assertNotNull(result, "Result should not be null");
-    assertEquals(mockActionResult, result, "Should return the mocked result");
+    assertNotNull(result, ASSERT_RESULT_NOT_NULL);
+    assertEquals(mockActionResult, result, ASSERT_SHOULD_RETURN_MOCKED_RESULT);
 
     verify(mockActionFactory, times(1)).get();
     verify(mockAction, times(1)).action(eq(nullParams), any(MutableBoolean.class));
   }
 
+  /**
+   * Tests the AsyncAction.run method with an empty JSON object as parameters.
+   * Verifies that the method can handle cases where no parameters are provided.
+   */
   @Test
   public void testRunWithEmptyParams() {
     JSONObject emptyParams = new JSONObject();
@@ -112,24 +143,31 @@ public class AsyncActionTest {
 
     ActionResult result = AsyncAction.run(mockActionFactory, emptyParams);
 
-    assertNotNull(result, "Result should not be null");
-    assertEquals(mockActionResult, result, "Should return the mocked result");
+    assertNotNull(result, ASSERT_RESULT_NOT_NULL);
+    assertEquals(mockActionResult, result, ASSERT_SHOULD_RETURN_MOCKED_RESULT);
 
     verify(mockActionFactory, times(1)).get();
     verify(mockAction, times(1)).action(eq(emptyParams), any(MutableBoolean.class));
   }
 
+  /**
+   * Tests that the AsyncAction.run method throws an exception when the action factory throws an exception.
+   * Verifies that the exception is propagated correctly.
+   */
   @Test
   public void testRunActionFactoryThrowsException() {
     when(mockActionFactory.get()).thenThrow(new RuntimeException("Factory error"));
 
-    RuntimeException exception = assertThrows(RuntimeException.class, () -> {
-      AsyncAction.run(mockActionFactory, testParams);
-    });
+    RuntimeException exception = assertThrows(RuntimeException.class,
+        () -> AsyncAction.run(mockActionFactory, testParams));
 
     assertEquals("Factory error", exception.getMessage());
   }
 
+  /**
+   * Tests that multiple calls to AsyncAction.run create new Action instances each time.
+   * Verifies that each call returns the correct ActionResult for each Action instance.
+   */
   @Test
   public void testRunMultipleCallsCreateNewActions() {
     Action mockAction2 = mock(Action.class);
@@ -157,6 +195,10 @@ public class AsyncActionTest {
     verify(mockAction2, times(1)).action(eq(testParams), any(MutableBoolean.class));
   }
 
+  /**
+   * Tests that the MutableBoolean passed to the action method is always initialized as false.
+   * Ensures that the AsyncAction class does not modify the MutableBoolean state unexpectedly.
+   */
   @Test
   public void testRunVerifyMutableBooleanIsAlwaysFalse() {
     ArgumentCaptor<MutableBoolean> booleanCaptor = ArgumentCaptor.forClass(MutableBoolean.class);
@@ -175,6 +217,13 @@ public class AsyncActionTest {
     }
   }
 
+  /**
+   * Tests the AsyncAction.run method with complex JSON parameters.
+   * Verifies that the method can handle nested and various types of JSON values.
+   *
+   * @throws JSONException
+   *     if there is an error creating or manipulating JSON objects
+   */
   @Test
   public void testRunWithComplexJSONParams() throws JSONException {
     // Given
@@ -194,12 +243,16 @@ public class AsyncActionTest {
 
     ActionResult result = AsyncAction.run(mockActionFactory, complexParams);
 
-    assertNotNull(result, "Result should not be null");
-    assertEquals(mockActionResult, result, "Should return the mocked result");
+    assertNotNull(result, ASSERT_RESULT_NOT_NULL);
+    assertEquals(mockActionResult, result, ASSERT_SHOULD_RETURN_MOCKED_RESULT);
 
     verify(mockAction, times(1)).action(eq(complexParams), any(MutableBoolean.class));
   }
 
+  /**
+   * Tests that the AsyncAction.run method returns null when the action method returns null.
+   * Verifies that the method handles null ActionResult correctly.
+   */
   @Test
   public void testRunActionReturnsNull() {
     when(mockActionFactory.get()).thenReturn(mockAction);
@@ -213,6 +266,13 @@ public class AsyncActionTest {
     verify(mockAction, times(1)).action(eq(testParams), any(MutableBoolean.class));
   }
 
+  /**
+   * Tests that the AsyncAction constructor is private and cannot be accessed directly.
+   * Verifies that an IllegalAccessException is thrown when attempting to instantiate via reflection.
+   *
+   * @throws Exception
+   *     if reflection fails or the constructor cannot be accessed
+   */
   @Test
   public void testConstructorIsPrivate() throws Exception {
     Constructor<AsyncAction> constructor = AsyncAction.class.getDeclaredConstructor();
@@ -222,6 +282,13 @@ public class AsyncActionTest {
     assertThrows(IllegalAccessException.class, constructor::newInstance);
   }
 
+  /**
+   * Tests that the private constructor of AsyncAction can be made accessible and an instance can be created via reflection.
+   * Useful for testing private constructors in a controlled manner.
+   *
+   * @throws Exception
+   *     if reflection fails or the constructor cannot be accessed
+   */
   @Test
   public void testConstructorMakeAccessibleAndInstantiate() throws Exception {
     Constructor<AsyncAction> constructor = AsyncAction.class.getDeclaredConstructor();

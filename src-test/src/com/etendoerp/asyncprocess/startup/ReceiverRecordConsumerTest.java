@@ -1,5 +1,11 @@
 package com.etendoerp.asyncprocess.startup;
 
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.CLIENT_ID_VALUE;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.EXTRACT_TARGETS_METHOD;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.JOB_ID_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.ORG_ID_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.TEST_ERROR_MESSAGE;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.TEST_PROCESS_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -197,7 +203,7 @@ public class ReceiverRecordConsumerTest {
     when(mockAsyncProcessExecution.getDescription()).thenReturn("Test description");
     when(mockAsyncProcessExecution.getParams()).thenReturn("{}");
     when(mockAsyncProcessExecution.getLog()).thenReturn("Test log");
-    when(mockAsyncProcessExecution.getAsyncProcessId()).thenReturn("test-process-id");
+    when(mockAsyncProcessExecution.getAsyncProcessId()).thenReturn(TEST_PROCESS_ID);
 
     when(mockActionResult.getMessage()).thenReturn("Success");
 
@@ -296,7 +302,7 @@ public class ReceiverRecordConsumerTest {
    */
   @Test
   public void testAcceptWithActionExceptionNoRetry() {
-    RuntimeException testException = new RuntimeException("Test error");
+    RuntimeException testException = new RuntimeException(TEST_ERROR_MESSAGE);
     mockedAsyncAction.when(() -> AsyncAction.run(eq(mockActionFactory), any(JSONObject.class)))
         .thenThrow(testException);
 
@@ -314,7 +320,7 @@ public class ReceiverRecordConsumerTest {
    */
   @Test
   public void testAcceptWithActionExceptionWithRetry() {
-    RuntimeException testException = new RuntimeException("Test error");
+    RuntimeException testException = new RuntimeException(TEST_ERROR_MESSAGE);
     mockedAsyncAction.when(() -> AsyncAction.run(eq(mockActionFactory), any(JSONObject.class)))
         .thenThrow(testException);
     when(mockRetryPolicy.shouldRetry(1)).thenReturn(true);
@@ -332,7 +338,7 @@ public class ReceiverRecordConsumerTest {
    */
   @Test
   public void testAcceptWithRetryExhausted() {
-    RuntimeException testException = new RuntimeException("Test error");
+    RuntimeException testException = new RuntimeException(TEST_ERROR_MESSAGE);
     mockedAsyncAction.when(() -> AsyncAction.run(eq(mockActionFactory), any(JSONObject.class)))
         .thenThrow(testException);
     when(mockRetryPolicy.shouldRetry(1)).thenReturn(false);
@@ -355,7 +361,7 @@ public class ReceiverRecordConsumerTest {
   public void testExtractTargetsFromResultStringNext() throws Exception {
     when(mockActionResult.getMessage()).thenReturn("{\"next\":\"custom-topic\"}");
 
-    List<String> targets = invokePrivateMethod("extractTargetsFromResult", mockActionResult);
+    List<String> targets = invokePrivateMethod(EXTRACT_TARGETS_METHOD, mockActionResult);
 
     assertEquals(2, targets.size());
     assertTrue(targets.contains(TEST_NEXT_TOPIC));
@@ -373,7 +379,7 @@ public class ReceiverRecordConsumerTest {
   public void testExtractTargetsFromResultArrayNext() throws Exception {
     when(mockActionResult.getMessage()).thenReturn("{\"next\":[\"topic1\",\"topic2\"]}");
 
-    List<String> targets = invokePrivateMethod("extractTargetsFromResult", mockActionResult);
+    List<String> targets = invokePrivateMethod(EXTRACT_TARGETS_METHOD, mockActionResult);
 
     assertEquals(3, targets.size());
     assertTrue(targets.contains(TEST_NEXT_TOPIC));
@@ -392,7 +398,7 @@ public class ReceiverRecordConsumerTest {
   public void testExtractTargetsFromResultInvalidJSON() throws Exception {
     when(mockActionResult.getMessage()).thenReturn("invalid json");
 
-    List<String> targets = invokePrivateMethod("extractTargetsFromResult", mockActionResult);
+    List<String> targets = invokePrivateMethod(EXTRACT_TARGETS_METHOD, mockActionResult);
 
     assertEquals(1, targets.size());
     assertTrue(targets.contains(TEST_NEXT_TOPIC));
@@ -409,7 +415,7 @@ public class ReceiverRecordConsumerTest {
   public void testExtractTargetsFromResultNullNext() throws Exception {
     when(mockActionResult.getMessage()).thenReturn("{\"next\":null}");
 
-    List<String> targets = invokePrivateMethod("extractTargetsFromResult", mockActionResult);
+    List<String> targets = invokePrivateMethod(EXTRACT_TARGETS_METHOD, mockActionResult);
 
     assertEquals(1, targets.size());
     assertTrue(targets.contains(TEST_NEXT_TOPIC));
@@ -428,9 +434,9 @@ public class ReceiverRecordConsumerTest {
 
     invokePrivateMethod("setupJobParams", params);
 
-    assertEquals(TEST_JOB_ID, params.getString("jobs_job_id"));
-    assertEquals(TEST_CLIENT_ID, params.getString("client_id"));
-    assertEquals(TEST_ORG_ID, params.getString("org_id"));
+    assertEquals(TEST_JOB_ID, params.getString(JOB_ID_KEY));
+    assertEquals(TEST_CLIENT_ID, params.getString(CLIENT_ID_VALUE));
+    assertEquals(TEST_ORG_ID, params.getString(ORG_ID_KEY));
   }
 
   /**
@@ -443,15 +449,15 @@ public class ReceiverRecordConsumerTest {
   @Test
   public void testSetupJobParamsExistingParams() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("jobs_job_id", "existing-job-id");
-    params.put("client_id", "existing-client-id");
-    params.put("org_id", "existing-org-id");
+    params.put(JOB_ID_KEY, "existing-job-id");
+    params.put(CLIENT_ID_VALUE, "existing-client-id");
+    params.put(ORG_ID_KEY, "existing-org-id");
 
     invokePrivateMethod("setupJobParams", params);
 
-    assertEquals("existing-job-id", params.getString("jobs_job_id"));
-    assertEquals("existing-client-id", params.getString("client_id"));
-    assertEquals("existing-org-id", params.getString("org_id"));
+    assertEquals("existing-job-id", params.getString(JOB_ID_KEY));
+    assertEquals("existing-client-id", params.getString(CLIENT_ID_VALUE));
+    assertEquals("existing-org-id", params.getString(ORG_ID_KEY));
   }
 
   /**
@@ -461,7 +467,7 @@ public class ReceiverRecordConsumerTest {
   @Test
   public void testCreateResponse() {
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
-    responseRecord.setAsyncProcessId("test-process-id");
+    responseRecord.setAsyncProcessId(TEST_PROCESS_ID);
 
     consumerWithoutRetry.createResponse(TEST_NEXT_TOPIC, mockKafkaSender, responseRecord);
 
@@ -477,7 +483,7 @@ public class ReceiverRecordConsumerTest {
   @Test
   public void testCreateResponseWithKafkaError() {
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
-    responseRecord.setAsyncProcessId("test-process-id");
+    responseRecord.setAsyncProcessId(TEST_PROCESS_ID);
 
     RuntimeException kafkaError = new RuntimeException("Kafka send failed");
     Flux<SenderResult<String>> errorFlux = Flux.error(kafkaError);
@@ -585,7 +591,7 @@ public class ReceiverRecordConsumerTest {
    */
   @Test
   public void testHandleErrorWithNullRetryPolicy() throws Exception {
-    RuntimeException testException = new RuntimeException("Test error");
+    RuntimeException testException = new RuntimeException(TEST_ERROR_MESSAGE);
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
 
     Method handleErrorMethod = ReceiverRecordConsumer.class.getDeclaredMethod(

@@ -1,5 +1,13 @@
 package com.etendoerp.asyncprocess.async;
 
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.CLIENT_ID_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.CLIENT_ID_VALUE;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.JOB_ID_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.JOB_ID_VALUE;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.MESSAGE_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.MESSAGE_VALUE;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.ORG_ID_KEY;
+import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.ORG_ID_VALUE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -90,9 +98,9 @@ class ResultCollectorTest extends OBBaseTest {
   @Test
   void testActionMissingJobsJobIdParameter() throws JSONException {
     JSONObject parameters = new JSONObject();
-    parameters.put("message", "Test message");
-    parameters.put("client_id", "testClientId");
-    parameters.put("org_id", "testOrgId");
+    parameters.put(MESSAGE_KEY, MESSAGE_VALUE);
+    parameters.put(CLIENT_ID_VALUE, CLIENT_ID_KEY);
+    parameters.put(ORG_ID_KEY, ORG_ID_VALUE);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     ActionResult result = resultCollector.action(parameters, isStopped);
@@ -116,9 +124,9 @@ class ResultCollectorTest extends OBBaseTest {
   @Test
   void testActionMissingMessageParameter() throws JSONException {
     JSONObject parameters = new JSONObject();
-    parameters.put("jobs_job_id", "testJobId");
-    parameters.put("client_id", "testClientId");
-    parameters.put("org_id", "testOrgId");
+    parameters.put(JOB_ID_KEY, JOB_ID_VALUE);
+    parameters.put(CLIENT_ID_VALUE, CLIENT_ID_KEY);
+    parameters.put(ORG_ID_KEY, ORG_ID_VALUE);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     ActionResult result = resultCollector.action(parameters, isStopped);
@@ -142,9 +150,9 @@ class ResultCollectorTest extends OBBaseTest {
   @Test
   void testActionMissingClientIdParameter() throws JSONException {
     JSONObject parameters = new JSONObject();
-    parameters.put("jobs_job_id", "testJobId");
-    parameters.put("message", "Test message");
-    parameters.put("org_id", "testOrgId");
+    parameters.put(JOB_ID_KEY, JOB_ID_VALUE);
+    parameters.put(MESSAGE_KEY, MESSAGE_VALUE);
+    parameters.put(ORG_ID_KEY, ORG_ID_VALUE);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     ActionResult result = resultCollector.action(parameters, isStopped);
@@ -164,9 +172,9 @@ class ResultCollectorTest extends OBBaseTest {
   @Test
   void testActionMissingOrgIdParameter() throws JSONException {
     JSONObject parameters = new JSONObject();
-    parameters.put("jobs_job_id", "testJobId");
-    parameters.put("message", "Test message");
-    parameters.put("client_id", "testClientId");
+    parameters.put(JOB_ID_KEY, JOB_ID_VALUE);
+    parameters.put(MESSAGE_KEY, MESSAGE_VALUE);
+    parameters.put(CLIENT_ID_VALUE, CLIENT_ID_KEY);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     ActionResult result = resultCollector.action(parameters, isStopped);
@@ -189,9 +197,7 @@ class ResultCollectorTest extends OBBaseTest {
     JSONObject parameters = null;
     MutableBoolean isStopped = new MutableBoolean(false);
 
-    assertThrows(NullPointerException.class, () -> {
-      resultCollector.action(parameters, isStopped);
-    });
+    assertThrows(NullPointerException.class, () -> resultCollector.action(parameters, isStopped));
   }
 
   /**
@@ -218,10 +224,10 @@ class ResultCollectorTest extends OBBaseTest {
   @Test
   void testActionWithEmptyJobId() throws JSONException {
     JSONObject parameters = new JSONObject();
-    parameters.put("jobs_job_id", "");
-    parameters.put("message", "Test message");
-    parameters.put("client_id", "testClientId");
-    parameters.put("org_id", "testOrgId");
+    parameters.put(JOB_ID_KEY, "");
+    parameters.put(MESSAGE_KEY, MESSAGE_VALUE);
+    parameters.put(CLIENT_ID_VALUE, CLIENT_ID_KEY);
+    parameters.put(ORG_ID_KEY, ORG_ID_VALUE);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     when(mockOBDal.get(eq(Job.class), eq(""))).thenReturn(null);
@@ -252,17 +258,17 @@ class ResultCollectorTest extends OBBaseTest {
     JSONObject parameters = new JSONObject() {
       @Override
       public String getString(String key) throws JSONException {
-        if ("jobs_job_id".equals(key)) {
+        if (JOB_ID_KEY.equals(key)) {
           // Simulate a scenario where the parameter exists but getting it fails
           throw new JSONException("Simulated JSON parsing error");
         }
         return super.getString(key);
       }
     };
-    parameters.put("jobs_job_id", "testJobId");
-    parameters.put("message", "Test message");
-    parameters.put("client_id", TEST_CLIENT_ID);
-    parameters.put("org_id", TEST_ORG_ID);
+    parameters.put(JOB_ID_KEY, JOB_ID_VALUE);
+    parameters.put(MESSAGE_KEY, MESSAGE_VALUE);
+    parameters.put(CLIENT_ID_VALUE, TEST_CLIENT_ID);
+    parameters.put(ORG_ID_KEY, TEST_ORG_ID);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     ActionResult result = resultCollector.action(parameters, isStopped);
@@ -284,10 +290,10 @@ class ResultCollectorTest extends OBBaseTest {
     setTestUserContext();
 
     JSONObject parameters = new JSONObject();
-    parameters.put("jobs_job_id", "INVALID_JOB_ID_THAT_DOES_NOT_EXIST");
-    parameters.put("message", "Test message");
-    parameters.put("client_id", TEST_CLIENT_ID);
-    parameters.put("org_id", TEST_ORG_ID);
+    parameters.put(JOB_ID_KEY, "INVALID_JOB_ID_THAT_DOES_NOT_EXIST");
+    parameters.put(MESSAGE_KEY, MESSAGE_VALUE);
+    parameters.put(CLIENT_ID_VALUE, TEST_CLIENT_ID);
+    parameters.put(ORG_ID_KEY, TEST_ORG_ID);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     ActionResult result = resultCollector.action(parameters, isStopped);

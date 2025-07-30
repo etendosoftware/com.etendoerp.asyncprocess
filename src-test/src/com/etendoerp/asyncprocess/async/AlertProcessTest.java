@@ -135,9 +135,7 @@ class AlertProcessTest extends OBBaseTest {
     JSONObject parameters = null;
     MutableBoolean isStopped = new MutableBoolean(false);
 
-    assertThrows(NullPointerException.class, () -> {
-      alertProcess.action(parameters, isStopped);
-    });
+    assertThrows(NullPointerException.class, () -> alertProcess.action(parameters, isStopped));
   }
 
   /**
