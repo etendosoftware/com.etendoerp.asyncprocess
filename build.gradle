@@ -7,7 +7,7 @@
 */
 
 group          = "com.etendoerp"
-version        = "2.2.2"
+version        = "2.3.0"
 description    = "Etendo Async Processes"
 ext.artifact   = "asyncprocess"
 ext.repository = "https://maven.pkg.github.com/etendosoftware/com.etendoerp.platform.extensions"
