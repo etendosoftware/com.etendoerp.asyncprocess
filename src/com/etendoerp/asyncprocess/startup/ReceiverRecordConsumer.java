@@ -132,7 +132,10 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
         previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
         contextChanged = true;
         JSONObject paramsObj = new JSONObject(params.getString("params"));
-        JSONObject context = paramsObj.getJSONObject("context");
+        JSONObject context = paramsObj.optJSONObject("context");
+        if (context == null) {
+          context = new JSONObject();
+        }
         OBContext.setOBContext(
             context.optString("user", previousUserId),
             context.optString("role", previousRoleId),
