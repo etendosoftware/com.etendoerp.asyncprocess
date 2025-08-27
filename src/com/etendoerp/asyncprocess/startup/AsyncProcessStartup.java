@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 
 import javax.enterprise.context.ApplicationScoped;
 
+import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewPartitions;
@@ -121,7 +122,8 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
           existsOrCreateTopic(adminKafka, topic, numPartitions);
 
           int k = 1;
-          if (jobLine.getJobsJob().isEtapConsumerPerPartition() || jobLine.isEtapConsumerPerPartition()) {
+          if ((jobLine.getJobsJob() != null && BooleanUtils.isTrue(jobLine.getJobsJob().isEtapConsumerPerPartition()))
+              || BooleanUtils.isTrue(jobLine.isEtapConsumerPerPartition())) {
             k = numPartitions;
           }
           List<Flux<ReceiverRecord<String, AsyncProcessExecution>>> receivers = new ArrayList<>();
