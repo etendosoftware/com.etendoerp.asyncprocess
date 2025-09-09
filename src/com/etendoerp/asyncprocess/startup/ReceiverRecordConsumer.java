@@ -55,6 +55,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   private final ScheduledExecutorService scheduler;
   private final Map<String, AtomicInteger> retryAttempts = new ConcurrentHashMap<>();
 
+  /**
+   * Basic constructor without retry policy and scheduler support.
+   */
   public ReceiverRecordConsumer(
       String jobId,
       Supplier<Action> actionFactory,
@@ -91,6 +94,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     this.scheduler = scheduler;
   }
 
+  /**
+   * Accepts and processes the received Kafka record.
+   */
   @Override
   public void accept(ReceiverRecord<String, AsyncProcessExecution> receiverRecord) {
     processRecord(receiverRecord, 0);
@@ -118,7 +124,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
         contextChanged = true;
       }
 
-      logger.info("Received message: topic-partition={} offset={} key={} attempt={}",
+      logger.debug("Received message: topic-partition={} offset={} key={} attempt={}",
           offset.topicPartition(),
           offset.offset(),
           receiverRecord.key(),
@@ -128,7 +134,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       var params = new JSONObject(strParams);
       setupJobParams(params);
 
-      // Add information about the current retry attempt, if any
+      // Add information about the current attempt if there are retries
       if (attemptNumber > 0) {
         params.put("retry_attempt", attemptNumber);
         log = log + "\n" + new Date() + ": Retry #" + attemptNumber;
@@ -212,7 +218,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       int nextAttempt = attemptNumber + 1;
       long delay = retryPolicy.getRetryDelay(nextAttempt);
 
-      logger.info("Scheduling retry {} for message {} after {} ms",
+      logger.debug("Scheduling retry {} for message {} after {} ms",
           nextAttempt, receiverRecord.key(), delay);
 
       // Do not acknowledge the offset to allow retry later
@@ -249,6 +255,13 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     }
   }
 
+  /**
+   * Creates and sends a response message to the specified topic.
+   *
+   * @param topic The Kafka topic to send the response to
+   * @param kafkaSender The Kafka sender instance
+   * @param responseRecord The response record to send
+   */
   public void createResponse(String topic,
       KafkaSender<String, AsyncProcessExecution> kafkaSender,
       AsyncProcessExecution responseRecord) {
@@ -264,7 +277,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
         .doOnError(e -> logger.error("Send failed", e))
         .subscribe(r -> {
           RecordMetadata metadata = r.recordMetadata();
-          logger.info("Message {} sent successfully, topic-partition={}-{} offset={}",
+          logger.debug("Message {} sent successfully, topic-partition={}-{} offset={}",
               r.correlationMetadata(),
               metadata.topic(),
               metadata.partition(),
