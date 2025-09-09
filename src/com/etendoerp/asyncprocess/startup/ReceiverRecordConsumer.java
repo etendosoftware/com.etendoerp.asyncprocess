@@ -55,6 +55,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
   private final ScheduledExecutorService scheduler;
   private final Map<String, AtomicInteger> retryAttempts = new ConcurrentHashMap<>();
 
+  /**
+   * Basic constructor without retry policy and scheduler support.
+   */
   public ReceiverRecordConsumer(
       String jobId,
       Supplier<Action> actionFactory,
@@ -91,6 +94,9 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     this.scheduler = scheduler;
   }
 
+  /**
+   * Accepts and processes the received Kafka record.
+   */
   @Override
   public void accept(ReceiverRecord<String, AsyncProcessExecution> receiverRecord) {
     processRecord(receiverRecord, 0);
@@ -116,15 +122,15 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     String previousRoleId = null;
     String previousUserId = null;
     try {
-      //if no context, set the default context. This is needed in the first message received
+      // If no context, set the default context. This is needed in the first message received
       if (OBContext.getOBContext() == null) {
         OBContext.setOBContext("100", "0", clientId, orgId);
       }
-      //always set admin mode
+      // Always set admin mode
       OBContext.setAdminMode(true);
       var strParams = receiverRecord.value() == null ? "{}" : receiverRecord.value().getParams();
       var params = new JSONObject(strParams);
-      // if the context info is in message, set it. And remember if it was changed
+      // If the context info is in the message, set it. And remember if it was changed
       if (params.has("params")) {
         previousUserId = OBContext.getOBContext().getUser().getId();
         previousRoleId = OBContext.getOBContext().getRole().getId();
@@ -144,7 +150,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
         );
       }
 
-      logger.info("Received message: topic-partition={} offset={} key={} attempt={}",
+      logger.debug("Received message: topic-partition={} offset={} key={} attempt={}",
           offset.topicPartition(),
           offset.offset(),
           receiverRecord.key(),
@@ -152,10 +158,10 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
 
       setupJobParams(params);
 
-      // Añadir información sobre el intento actual si hay reintentos
+      // Add information about the current attempt if there are retries
       if (attemptNumber > 0) {
         params.put("retry_attempt", attemptNumber);
-        log = log + "\n" + new Date() + ": Reintento #" + attemptNumber;
+        log = log + "\n" + new Date() + ": Retry #" + attemptNumber;
       }
 
       var result = AsyncAction.run(actionFactory, params);
@@ -245,16 +251,16 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       int nextAttempt = attemptNumber + 1;
       long delay = retryPolicy.getRetryDelay(nextAttempt);
 
-      logger.info("Scheduling retry {} for message {} after {} ms",
+      logger.debug("Scheduling retry {} for message {} after {} ms",
           nextAttempt, receiverRecord.key(), delay);
 
-      // No confirmar el offset para permitir el reintento después
+      // Do not acknowledge the offset to allow retry later
       scheduler.schedule(() -> processRecord(receiverRecord, nextAttempt), delay, TimeUnit.MILLISECONDS);
     } else {
-      // No hay más reintentos, enviar al topic de error
+      // No more retries, send to error topic
       log = log + "\n" + new Date() + ": " + e.getMessage();
       if (attemptNumber > 0) {
-        log = log + "\n" + new Date() + ": Max reintentos alcanzados (" + attemptNumber + ")";
+        log = log + "\n" + new Date() + ": Max retries reached (" + attemptNumber + ")";
       }
 
       responseRecord.setLog(log);
@@ -282,6 +288,13 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
     }
   }
 
+  /**
+   * Creates and sends a response message to the specified topic.
+   *
+   * @param topic The Kafka topic to send the response to
+   * @param kafkaSender The Kafka sender instance
+   * @param responseRecord The response record to send
+   */
   public void createResponse(String topic,
       KafkaSender<String, AsyncProcessExecution> kafkaSender,
       AsyncProcessExecution responseRecord) {
@@ -297,7 +310,7 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
         .doOnError(e -> logger.error("Send failed", e))
         .subscribe(r -> {
           RecordMetadata metadata = r.recordMetadata();
-          logger.info("Message {} sent successfully, topic-partition={}-{} offset={}",
+          logger.debug("Message {} sent successfully, topic-partition={}-{} offset={}",
               r.correlationMetadata(),
               metadata.topic(),
               metadata.partition(),
