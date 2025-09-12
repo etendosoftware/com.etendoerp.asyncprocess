@@ -86,9 +86,24 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
       var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
 
+      List<Job> list = critJob.list();
+      if (list.isEmpty()) {
+        log.info("No async process found, reactor will not connect to any topic until restart.");
+        return;
+      }
+      log.info("Found {} async jobs to start", list.size());
+      if (!isAsyncJobsEnabled()) {
+        log.warn(
+            "There are async jobs defined, but the Kafka integration is disabled, so the reactor will not connect to any topic until enabled.");
+        log.warn("To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
+        log.warn(
+            "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
+        return;
+      }
+
       //Create the Kafka Connect topics
       createKafkaConnectTopics(obProps, adminKafka);
-      Flux.fromStream(critJob.list().stream())
+      Flux.fromStream(list.stream())
           .flatMap(job -> {
             // Configure or create the scheduler for this job
             configureJobScheduler(job);
@@ -304,6 +319,37 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
 
     return config;
+  }
+
+  /**
+   * Checks if asynchronous jobs are enabled based on the Openbravo properties configuration.
+   *
+   * <p>This method retrieves the `kafka.enable` property from the Openbravo properties file
+   * and compares its value to "true" (case-insensitive). If the property is not defined,
+   * it defaults to "false".
+   *
+   * @return `true` if asynchronous jobs are enabled, otherwise `false`.
+   */
+  private boolean isAsyncJobsEnabled() {
+    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+    return propInTrue(obProps, "kafka.enable");
+  }
+
+  /**
+   * Checks if a given property in the `Properties` object is set to "true".
+   *
+   * <p>This method verifies if the specified property key exists in the `Properties` object
+   * and whether its value (case-insensitive) is equal to "true". If the property does not exist,
+   * it defaults to "false".
+   *
+   * @param obProps
+   *     The `Properties` object containing configuration values.
+   * @param propKey
+   *     The key of the property to check.
+   * @return `true` if the property exists and its value is "true", otherwise `false`.
+   */
+  private static boolean propInTrue(Properties obProps, String propKey) {
+    return obProps.containsKey(propKey) && StringUtils.equalsIgnoreCase(obProps.getProperty(propKey, "false"), "true");
   }
 
   private AsyncProcessState convertState(String status) {
