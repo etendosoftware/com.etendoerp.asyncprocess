@@ -1,0 +1,557 @@
+# Technical Design - com.etendoerp.asyncprocess Module (Etendo ERP Classic)
+
+## Executive Summary
+
+The `com.etendoerp.asyncprocess` module implements an **asynchronous processing microservice** based on **Kafka Streams** and **Project Reactor** for Etendo ERP Classic. This module provides a robust and highly scalable infrastructure for distributed workflow processing, reactive state management, and asynchronous business process orchestration with support for fault recovery and real-time monitoring.
+
+**Important Note:** This module belongs to **Etendo ERP Classic** and is different from the **Etendo RX AsyncProcess** system.
+
+## General Architecture
+
+### Main Components Diagram
+
+```plantuml
+@startuml
+package "com.etendoerp.asyncprocess (Etendo ERP Classic)" {
+  package "Startup & Configuration" {
+    [AsyncProcessStartup] <<ApplicationScoped>>
+    [AsyncProcessConfig]
+    [ReceiverRecordConsumer]
+  }
+  
+  package "Core Processing" {
+    [AsyncProcessor] <<Abstract Action>>
+    [AsyncAction] <<Static Utility>>
+  }
+  
+  package "Data Model" {
+    [AsyncProcessExecution] <<DTO>>
+    [AsyncProcessState] <<Enum>>
+    [AsyncProcess] <<Entity>>
+  }
+  
+  package "Retry & Error Handling" {
+    [RetryPolicy] <<Interface>>
+    [SimpleRetryPolicy]
+    [ErrorCollector]
+    [ResultCollector]
+  }
+  
+  package "Serialization" {
+    [AsyncProcessExecutionDeserializer]
+    [AsyncProcessDeserializer]
+  }
+}
+
+package "External Infrastructure" {
+  [Kafka Cluster]
+  [SMF Jobs Framework]
+  [Project Reactor]
+  [Kafka Streams]
+  [Server-Sent Events]
+}
+
+[AsyncProcessStartup] --> [ReceiverRecordConsumer] : creates
+[ReceiverRecordConsumer] --> [AsyncProcessor] : executes
+[AsyncProcessor] --> [SMF Jobs Framework] : extends Action
+[AsyncProcessStartup] --> [Kafka Cluster] : manages topics
+[ReceiverRecordConsumer] --> [Project Reactor] : uses Flux/Mono
+[AsyncProcessExecution] --> [AsyncProcessExecutionDeserializer] : serialized by
+[RetryPolicy] --> [SimpleRetryPolicy] : implemented by
+[AsyncProcessStartup] --> [ErrorCollector] : error handling
+[AsyncProcessStartup] --> [ResultCollector] : result processing
+
+@enduml
+```
+
+## Main Components
+
+### 1. AsyncProcessStartup (Initialization Core)
+
+**Function:** CDI component responsible for complete initialization of the asynchronous processing ecosystem in Etendo ERP Classic.
+
+**Technical characteristics:**
+- **Scope:** `@ApplicationScoped` for singleton in CDI container
+- **Implements:** `EtendoReactorSetup` for integration with Reactor infrastructure
+- **Manages:** 619 lines of code with critical initialization logic
+- **Integration:** Native with Etendo ERP SMF Jobs Framework
+
+**Key functionalities:**
+```plantuml
+@startuml
+participant "CDI Container" as CDI
+participant "AsyncProcessStartup" as APS
+participant "Kafka Admin" as KA
+participant "Job Repository" as JR
+participant "Reactor Infrastructure" as RI
+
+CDI -> APS: @PostConstruct init()
+APS -> KA: createAdminClient()
+APS -> JR: loadAsyncJobs()
+loop for each AsyncJob
+  APS -> APS: configureJobScheduler()
+  APS -> APS: createKafkaTopics()
+  APS -> RI: createReactorSubscription()
+end
+APS -> APS: setupErrorHandling()
+@enduml
+```
+
+**Advanced configuration supported:**
+- **Job Parallelism:** `etapParallelThreads` (default: 8 threads)
+- **Retry Policies:** `etapMaxRetries`, `etapRetryDelayMs`
+- **Prefetch optimization:** `etapPrefetchCount` for memory control
+- **Dynamic Partitioning:** Support for consumer-per-partition
+- **Kafka Connect Topics:** Automatic configuration for Debezium
+
+### 2. ReceiverRecordConsumer (Event Processor)
+
+**Function:** Reactive consumer that implements the complete cycle of Kafka message processing with advanced support for retries and error handling.
+
+**Processing architecture:**
+```plantuml
+@startuml
+title Message Processing Flow
+
+participant "Kafka Topic" as KT
+participant "ReceiverRecordConsumer" as RRC
+participant "Action Instance" as AI
+participant "Retry Scheduler" as RS
+participant "Error Topic" as ET
+participant "Next Topic" as NT
+
+KT -> RRC: ReceiverRecord
+RRC -> RRC: establishOBContext()
+RRC -> RRC: setupJobParams()
+alt Successful Processing
+  RRC -> AI: AsyncAction.run()
+  AI -> RRC: ActionResult
+  RRC -> RRC: extractTargetsFromResult()
+  RRC -> NT: publishSuccess()
+else Processing Error
+  RRC -> RRC: handleError()
+  alt Retries Available
+    RRC -> RS: schedule retry
+    RS -> RRC: processRecord(attempt+1)
+  else Max Retries Reached
+    RRC -> ET: publishError()
+  end
+end
+RRC -> KT: acknowledge()
+@enduml
+```
+
+**Advanced features:**
+- **Context Management:** Automatic `OBContext` management with per-message context support
+- **Retry Policy Integration:** Support for configurable retry policies
+- **Dynamic Topic Routing:** Topic response extraction from `ActionResult.message`
+- **Parallel Execution:** Support for parallel execution with dedicated schedulers
+- **SMF Jobs Integration:** Native integration with Etendo jobs framework
+
+### 3. AsyncProcessor (Abstract Base Class)
+
+**Function:** Abstraction that simplifies creating asynchronous processors by extending the Etendo ERP SMF Jobs framework.
+
+**Inheritance design:**
+```java
+public abstract class AsyncProcessor extends Action {
+    public abstract Function<JSONObject, ActionResult> consumer();
+    
+    protected ActionResult action(JSONObject parameters, MutableBoolean isStopped) {
+        var result = consumer().apply(parameters);
+        var actionResult = new ActionResult();
+        actionResult.setMessage(result.toString());
+        actionResult.setType(Result.Type.SUCCESS);
+        return actionResult;
+    }
+}
+```
+
+**Design advantages:**
+- **Functional Programming:** Use of `Function<JSONObject, ActionResult>` for business logic
+- **SMF Integration:** Direct inheritance from `com.smf.jobs.Action`
+- **Simplified Development:** Simplified API for Etendo ERP developers
+- **Type Safety:** Typed result handling with `ActionResult`
+
+### 4. Data Model
+
+#### AsyncProcessExecution (State Transport)
+```java
+public class AsyncProcessExecution implements Comparable<AsyncProcessExecution> {
+    private String id;
+    private String asyncProcessId;
+    private String log;
+    private String description;
+    private String params;
+    
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "dd-MM-yyyy hh:mm:ss")
+    private Date time;
+    
+    private AsyncProcessState state = AsyncProcessState.ACCEPTED;
+}
+```
+
+**Model characteristics:**
+- **Temporal Ordering:** Implements `Comparable` for chronological ordering
+- **JSON Serialization:** Jackson configuration for standard date format
+- **State Management:** Integration with `AsyncProcessState` enum
+- **Audit Trail:** `log` and `description` fields for traceability
+
+#### AsyncProcessState (Workflow States)
+```java
+public enum AsyncProcessState {
+    WAITING,    // In processing queue
+    ACCEPTED,   // Accepted for processing
+    STARTED,    // Processing started
+    DONE,       // Successfully completed
+    REJECTED,   // Rejected by validations
+    ERROR       // Processing error
+}
+```
+
+### 5. Retry System
+
+#### RetryPolicy (Interface)
+```java
+public interface RetryPolicy {
+    boolean shouldRetry(int attemptNumber);
+    long getRetryDelay(int attemptNumber);
+}
+```
+
+#### SimpleRetryPolicy (Implementation)
+**Algorithm:** Implements retries with fixed delay and maximum attempt limit.
+
+**Configuration:**
+- `maxRetries`: Maximum number of retries (default: 3)
+- `retryDelayMs`: Delay between retries in milliseconds (default: 1000ms)
+
+**Scheduler Integration:**
+```java
+scheduler.schedule(() -> processRecord(receiverRecord, nextAttempt), 
+                  delay, TimeUnit.MILLISECONDS);
+```
+
+## Main Data Flows
+
+### 1. System Initialization
+
+```plantuml
+@startuml
+title AsyncProcess Initialization Sequence (Etendo ERP Classic)
+
+participant "Etendo Startup" as ES
+participant "AsyncProcessStartup" as APS
+participant "Kafka Admin" as KA
+participant "Job Repository" as JR
+participant "Reactor Setup" as RS
+
+ES -> APS: init()
+APS -> JR: loadAsyncJobs()
+JR -> APS: List<Job>
+alt Jobs Found && Kafka Enabled
+  APS -> KA: createAdminClient()
+  APS -> APS: createKafkaConnectTopics()
+  loop for each Job
+    APS -> APS: configureJobScheduler(job)
+    APS -> APS: calculateTopics(job)
+    APS -> KA: existsOrCreateTopic()
+    APS -> RS: createReceiver()
+    APS -> RS: subscribeToTopic()
+  end
+  APS -> ES: Reactor Setup Complete
+else No Jobs or Kafka Disabled
+  APS -> ES: Skip Reactor Setup
+end
+@enduml
+```
+
+### 2. Complete Message Processing
+
+```plantuml
+@startuml
+title End-to-End Message Processing (Etendo ERP Classic)
+
+participant "Kafka Producer" as KP
+participant "Kafka Topic" as KT
+participant "ReceiverRecordConsumer" as RRC
+participant "Action Instance" as AI
+participant "Result Topic" as RT
+participant "Error Topic" as ET
+
+KP -> KT: publish message
+KT -> RRC: deliver ReceiverRecord
+RRC -> RRC: setOBContext()
+RRC -> RRC: parseParameters()
+alt Successful Processing
+    RRC -> AI: action(parameters)
+    AI -> AI: business logic
+    AI -> RRC: ActionResult(SUCCESS)
+    RRC -> RRC: extractTargets()
+    RRC -> RT: publish result
+    RRC -> KT: acknowledge()
+else Processing Error
+    RRC -> RRC: checkRetryPolicy()
+    alt Retries Available
+        RRC -> RRC: scheduleRetry()
+    else Max Retries
+        RRC -> ET: publish error
+        RRC -> KT: acknowledge()
+    end
+end
+@enduml
+```
+
+## Configuration and Properties
+
+### 1. Kafka Properties (Etendo ERP Classic)
+```properties
+# Kafka Connection
+kafka.url=localhost:29092
+kafka.enable=true
+kafka.topic.partitions=5
+
+# Tables for Kafka Connect (Debezium)
+kafka.connect.tables=public.business_table1,public.business_table2
+
+# Docker configuration for Etendo ERP
+docker_com.etendoerp.tomcat=true
+```
+
+### 2. Job Line Configuration (SMF Jobs Integration)
+```java
+// Advanced configuration in JobLine (Etendo ERP)
+etapMaxRetries=5                    // Maximum retries
+etapRetryDelayMs=2000              // Delay between retries
+etapPrefetchCount=10               // Messages in prefetch
+etapConsumerPerPartition=true      // Consumer per partition
+etapParallelThreads=16             // Parallel threads
+```
+
+### 3. Topic Naming Convention (Etendo-specific)
+```java
+// Topic naming patterns for Etendo ERP
+String initialTopic = job.getEtapInitialTopic();           // Initial topic
+String targetTopic = jobLine.getEtapTargettopic();        // Target topic
+String errorTopic = job.getEtapErrortopic();              // Error topic
+
+// Default patterns
+String defaultTopic = "{job.name}-{lineNo}";              // Default topic
+String errorTopicPattern = "{job.name}-error";            // Error pattern
+String resultTopicPattern = "{job.name}-result";          // Result pattern
+```
+
+## Implemented Design Patterns
+
+### 1. Reactive Streams Pattern
+**Implementation:** Extensive use of Project Reactor with `Flux<ReceiverRecord>` for non-blocking asynchronous processing.
+
+```java
+Flux.fromStream(jobLines.stream())
+    .flatMap(jobLine -> createReceiver(topic, config))
+    .subscribe(new ReceiverRecordConsumer(...));
+```
+
+### 2. Factory Pattern
+**Implementation:** `NewInstance` as factory for `Action` instances with CDI integration.
+
+```java
+private static class NewInstance implements Supplier<Action> {
+    public Action get() {
+        return (Action) WeldUtils.getInstanceFromStaticBeanManager(handler);
+    }
+}
+```
+
+### 3. Template Method Pattern
+**Implementation:** `AsyncProcessor` defines template with `consumer()` as abstract method.
+
+### 4. State Pattern
+**Implementation:** `AsyncProcessState` enum for workflow state management.
+
+## Integration with Etendo ERP Infrastructure
+
+### 1. SMF Jobs Framework
+```java
+// AsyncProcessor extends Action from SMF framework
+public abstract class AsyncProcessor extends Action {
+    // Template method pattern to simplify development
+    protected ActionResult action(JSONObject parameters, MutableBoolean isStopped);
+}
+```
+
+### 2. Project Reactor Integration
+```java
+// Use of Reactive Streams for non-blocking processing
+Flux<ReceiverRecord<String, AsyncProcessExecution>> receiver = 
+    new DefaultKafkaReceiver<>(ConsumerFactory.INSTANCE, receiverOptions);
+```
+
+### 3. OBContext Management (Etendo-specific)
+```java
+// Etendo ERP specific context management
+if (OBContext.getOBContext() == null) {
+    OBContext.setOBContext("100", "0", clientId, orgId);
+}
+OBContext.setAdminMode(true);
+```
+
+### 4. Kafka Connect Topic Creation (Debezium Integration)
+```java
+// Automatic topic creation for Debezium
+private void createKafkaConnectTopics(Properties props, AdminClient adminKafka) {
+    var tableNames = props.getProperty("kafka.connect.tables", null);
+    String[] tables = tableNames.split(",");
+    for (String table : tables) {
+        if (!StringUtils.startsWithIgnoreCase(table, "public.")) {
+            table = "public." + table;
+        }
+        String topic = "default." + table;
+        existsOrCreateTopic(adminKafka, topic, numPartitions);
+    }
+}
+```
+
+## Performance Considerations
+
+### 1. Implemented Optimizations
+- **Parallel Processing:** Support for multiple consumers per partition
+- **Prefetch Control:** Configuration of `MAX_POLL_RECORDS_CONFIG`
+- **Thread Pool Management:** Dedicated schedulers per Job
+- **Lazy Initialization:** On-demand resource creation
+- **OBContext Reuse:** Etendo ERP context optimization
+
+### 2. Key Metrics
+- **Throughput:** Configuration of partitions and parallel consumers
+- **Latency:** Prefetch and batch processing control
+- **Memory:** Object and context pooling management
+- **Reliability:** Retry system and dead letter queues
+
+### 3. Scalability Configuration
+```java
+// Horizontal scaling configuration
+int numPartitions = getNumPartitions();                    // Partitions per topic
+int parallelThreads = getJobParallelThreads(job);         // Threads per job
+int prefetchCount = config.getPrefetchCount();            // Memory control
+boolean consumerPerPartition = job.isEtapConsumerPerPartition(); // Scaling pattern
+```
+
+## Error Handling and Monitoring
+
+### 1. Error Handling Strategy
+```plantuml
+@startuml
+title Error Handling Strategy (Etendo ERP Classic)
+
+start
+:Receive Message;
+:Process Message;
+if (Processing Successful?) then (yes)
+    :Publish Success;
+    stop
+else (no)
+    :Check Retry Policy;
+    if (Retries Available?) then (yes)
+        :Schedule Retry;
+        :Log Retry Attempt;
+        stop
+    else (no)
+        :Publish to Error Topic;
+        :Log Final Error;
+        stop
+    endif
+endif
+@enduml
+```
+
+### 2. Logging and Audit Trail
+```java
+// Enriched log with processing context
+logger.info("Received message: topic-partition={} offset={} key={} attempt={}",
+    offset.topicPartition(), offset.offset(), receiverRecord.key(), attemptNumber);
+
+// Audit trail in AsyncProcessExecution
+responseRecord.setLog(log + "\n" + new Date() + ": " + result.getMessage());
+```
+
+### 3. Health Check Integration
+```java
+// Graceful shutdown with timeout
+public void shutdown() {
+    for (ScheduledExecutorService scheduler : jobSchedulers.values()) {
+        if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+            scheduler.shutdownNow();
+        }
+    }
+}
+```
+
+## Evolution towards ACR Architecture
+
+### 1. Centralized Logging Integration (According to ACR)
+```java
+// New integration proposed in ACR
+public class LogPersistorAction extends Action {
+    @Override
+    public void action(JSONObject parameters) {
+        // Consume from async-process-execution topic
+        // Persist to etask_log table
+        AsyncLogUtil.persistToDatabase(parameters);
+    }
+}
+```
+
+### 2. Dual Persistence Architecture
+**Current State:** Only Kafka Streams with in-memory state store
+**ACR Evolution:** Kafka Streams + parallel PostgreSQL persistence
+
+### 3. Unified Error Monitoring
+**Current State:** Distributed error topics per job
+**ACR Evolution:** Centralized log system with Error Monitor UI
+
+## Differences with Etendo RX AsyncProcess
+
+| Aspect | com.etendoerp.asyncprocess (Classic) | Etendo RX AsyncProcess |
+|---------|-------------------------------------|------------------------|
+| **Base Framework** | SMF Jobs + Project Reactor | Spring Cloud Stream |
+| **Context Management** | OBContext (Etendo ERP) | Spring Security Context |
+| **Job Configuration** | JobLine entities in DB | YAML/Properties |
+| **Error Handling** | Custom retry policies | Spring retry annotations |
+| **Persistence** | Kafka Streams State Store | Database + Kafka |
+| **Monitoring** | Custom logging | Spring Actuator |
+| **CDI Integration** | Weld CDI | Spring IoC |
+
+## Roadmap and Future Improvements
+
+### 1. Advanced Observability
+- **Micrometer Integration:** JVM and business metrics
+- **Distributed Tracing:** OpenTelemetry for end-to-end traceability
+- **Health Checks:** Infrastructure monitoring endpoints
+
+### 2. Performance Optimization
+- **Kafka Streams State Stores:** State management optimization
+- **Batching Improvements:** Batch processing for better throughput
+- **Connection Pooling:** Kafka connection optimization
+
+### 3. Resilience Patterns
+- **Circuit Breaker:** Protection against downstream service failures
+- **Bulkhead Pattern:** Resource isolation by workload type
+- **Chaos Engineering:** Automated resilience testing
+
+## Conclusions
+
+The `com.etendoerp.asyncprocess` module represents a mature and well-structured implementation of asynchronous processing for **Etendo ERP Classic**. Its architecture based on **Reactive Streams** and **Kafka** provides:
+
+**Main strengths:**
+- **Horizontal scalability:** Native support for partitioning and parallelism
+- **Resilience:** Robust retry system and error handling
+- **Flexibility:** Granular configuration per job and job line
+- **Etendo Integration:** Native integration with SMF Jobs and Etendo ERP infrastructure
+- **Debezium Support:** Automatic configuration for Change Data Capture
+
+**Improvement opportunities (identified in ACR):**
+- **Dual persistence:** Complement Kafka Streams with PostgreSQL
+- **Centralized logging:** Unified log and monitoring system
+- **Error management:** Centralized UI for error management
+
+This module constitutes the solid foundation for implementing the proposed **Architecture Change Request (ACR)**, providing the necessary infrastructure for centralized logging and advanced error management in the Etendo ERP Classic task ecosystem.
