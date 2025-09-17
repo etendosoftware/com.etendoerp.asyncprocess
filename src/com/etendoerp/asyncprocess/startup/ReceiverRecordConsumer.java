@@ -20,6 +20,8 @@ import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.openbravo.base.exception.OBException;
+import org.openbravo.client.application.Process;
 import org.openbravo.dal.core.OBContext;
 
 import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
@@ -29,6 +31,7 @@ import com.smf.jobs.Action;
 import com.smf.jobs.ActionResult;
 import com.smf.jobs.AsyncAction;
 
+import org.openbravo.dal.service.OBDal;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.ReceiverOffset;
 import reactor.kafka.receiver.ReceiverRecord;
@@ -39,7 +42,7 @@ import reactor.kafka.sender.SenderRecord;
  * Enhanced class that encapsulates all necessary objects to receive a message,
  * call the consumer, and respond based on the result, with support for retries and parallel processing.
  */
-class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
+public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
   private static final Logger logger = LogManager.getLogger();
   private final String jobId;
   private final Supplier<Action> actionFactory;
@@ -165,15 +168,33 @@ class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncPro
       }
 
       var result = AsyncAction.run(actionFactory, params);
+      params = params == null ? new JSONObject() : params;
+      try {
+        String actionClassName = actionFactory.get().getClass().getName();
+        Process actionObj = (Process) OBDal.getInstance().createCriteria(org.openbravo.client.application.Process.class)
+            .add(org.hibernate.criterion.Restrictions.eq("javaClassName", actionClassName))
+            .setMaxResults(1)
+            .uniqueResult();
+        params.put("obuiapp_process_id", actionObj == null ? "" : actionObj.getId());
+      } catch (JSONException e) {
+        logger.error("Error obtaining action class name: {}", e.getMessage(), e);
+        throw new OBException(e);
+      }
       params.put("message", result.getMessage());
       if (!StringUtils.isEmpty(result.getMessage())) {
-        log = log + "\n" + new Date() + ": " + result.getMessage();
+        if (!StringUtils.isEmpty(log)) {
+          log += "\n";
+        }
+        log = log + new Date() + ": " + result.getMessage();
       }
 
       responseRecord.setLog(log);
       responseRecord.setParams(params.toString());
       responseRecord.setState(targetStatus);
 
+      if (receiverRecord.topic() != null && !StringUtils.equals(receiverRecord.topic(), "async-process-execution")) {
+        createResponse("async-process-execution", kafkaSender, responseRecord);
+      }
       // Acknowledge the message only if no more retries are needed
       offset.acknowledge();
 

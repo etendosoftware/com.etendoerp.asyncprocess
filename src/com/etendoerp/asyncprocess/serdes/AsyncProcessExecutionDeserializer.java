@@ -38,8 +38,8 @@ public class AsyncProcessExecutionDeserializer implements Deserializer<AsyncProc
       JsonObject jsonObject = new JsonObject();
       jsonObject.addProperty("id", "0");
       jsonObject.addProperty("asyncProcessId", "4448");
-      jsonObject.addProperty("log", "0");
-      jsonObject.addProperty("description", "0");
+      jsonObject.addProperty("log", "");
+      jsonObject.addProperty("description", "");
       jsonObject.addProperty("params", new String(data, StandardCharsets.UTF_8));
       String newData = jsonObject.toString();
       return objectMapper.readValue(newData, AsyncProcessExecution.class);

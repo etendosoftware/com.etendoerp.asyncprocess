@@ -1,21 +1,20 @@
 package com.etendoerp.asyncprocess.startup;
 
-import static com.etendoerp.asyncprocess.util.TopicUtil.createTopic;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
-import java.util.regex.Pattern;
-
-import javax.enterprise.context.ApplicationScoped;
-
+import com.etendoerp.asyncprocess.circuit.KafkaCircuitBreaker;
+import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
+import com.etendoerp.asyncprocess.config.AsyncProcessReconfigurationManager;
+import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
+import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
+import com.etendoerp.asyncprocess.model.AsyncProcessState;
+import com.etendoerp.asyncprocess.monitoring.AsyncProcessMonitor;
+import com.etendoerp.asyncprocess.recovery.ConsumerRecoveryManager;
+import com.etendoerp.asyncprocess.retry.RetryPolicy;
+import com.etendoerp.asyncprocess.retry.SimpleRetryPolicy;
+import com.etendoerp.asyncprocess.serdes.AsyncProcessExecutionDeserializer;
+import com.etendoerp.reactor.EtendoReactorSetup;
+import com.smf.jobs.Action;
+import com.smf.jobs.model.Job;
+import com.smf.jobs.model.JobLine;
 import org.apache.commons.lang3.BooleanUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -34,18 +33,7 @@ import org.openbravo.client.application.Process;
 import org.openbravo.client.kernel.ComponentProvider;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
-
-import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
-import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
-import com.etendoerp.asyncprocess.model.AsyncProcessState;
-import com.etendoerp.asyncprocess.retry.RetryPolicy;
-import com.etendoerp.asyncprocess.retry.SimpleRetryPolicy;
-import com.etendoerp.asyncprocess.serdes.AsyncProcessExecutionDeserializer;
-import com.etendoerp.reactor.EtendoReactorSetup;
-import com.smf.jobs.Action;
-import com.smf.jobs.model.Job;
-import com.smf.jobs.model.JobLine;
-
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.receiver.ReceiverRecord;
@@ -54,8 +42,26 @@ import reactor.kafka.receiver.internals.DefaultKafkaReceiver;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 
+import javax.enterprise.context.ApplicationScoped;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
+
+import static com.etendoerp.asyncprocess.util.TopicUtil.createTopic;
+
 /**
- * Startup process called to initialize defined workflows with advanced configuration.
+ * Enhanced startup process for async process workflows with advanced configuration,
+ * health monitoring, auto-recovery, and circuit breaker protection.
  */
 @ApplicationScoped
 @ComponentProvider.Qualifier(AsyncProcessStartup.ASYNC_PROCESS_STARTUP)
@@ -78,81 +84,517 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
   // Map to maintain schedulers per job
   private final Map<String, ScheduledExecutorService> jobSchedulers = new HashMap<>();
+  private final Map<String, Disposable> activeSubscriptions = new HashMap<>();
+
+  // Enhanced components for resilience and monitoring
+  private KafkaHealthChecker healthChecker;
+  private ConsumerRecoveryManager recoveryManager;
+  private AsyncProcessReconfigurationManager reconfigurationManager;
+  private KafkaCircuitBreaker circuitBreaker;
+  private AsyncProcessMonitor processMonitor;
+  private volatile boolean isInitialized = false;
 
   @Override
   public void init() {
-    log.info("Etendo Reactor Startup with Advanced Configuration");
-    var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
-    String kafkaHost = getKafkaHost(obProps);
-    Properties props = getKafkaServerConfigProps(kafkaHost);
-    try (AdminClient adminKafka = AdminClient.create(props)) {
-      KafkaSender<String, AsyncProcessExecution> kafkaSender = crateSender(kafkaHost);
-      OBContext.setOBContext("100", "0", "0", "0");
-      var critJob = OBDal.getInstance().createCriteria(Job.class);
-      critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
-      List<Job> list = critJob.list();
-      if (list.isEmpty()) {
-        log.info("No async process found, reactor will not connect to any topic until restart.");
-        return;
-      }
-      log.info("Found {} async jobs to start", list.size());
-      if (!isAsyncJobsEnabled()) {
-        log.warn(
-            "There are async jobs defined, but the Kafka integration is disabled, so the reactor will not connect to any topic until enabled.");
-        log.warn("To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
-        log.warn(
-            "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
-        return;
-      }
-      //Create the Kafka Connect topics
-      createKafkaConnectTopics(obProps, adminKafka);
-      Flux.fromStream(list.stream()).flatMap(job -> {
-        // Configure or create the scheduler for this job
-        configureJobScheduler(job);
+    log.info("Etendo Reactor Startup with Enhanced Resilience and Monitoring");
 
-        var jobLines = job.getJOBSJobLineList();
-        jobLines.sort((o1, o2) -> (int) (o1.getLineNo() - o2.getLineNo()));
-        return Flux.fromStream(jobLines.stream()).map(jobLine -> {
-          // Get the configuration for this job line
-          AsyncProcessConfig config = getJobLineConfig(jobLine);
+    try {
+      var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+      String kafkaHost = getKafkaHost(obProps);
 
-          String topic = calculateCurrentTopic(jobLine, jobLines);
-          // Validate if the topic exists, if not create it
-          int numPartitions = getNumPartitions();
-          existsOrCreateTopic(adminKafka, topic, numPartitions);
+      // Initialize health checker first
+      initializeHealthChecker(kafkaHost);
 
-          int k = 1;
-          if ((jobLine.getJobsJob() != null && BooleanUtils.isTrue(jobLine.getJobsJob().isEtapConsumerPerPartition()))
-              || BooleanUtils.isTrue(jobLine.isEtapConsumerPerPartition())) {
-            k = numPartitions;
-          }
-          List<Flux<ReceiverRecord<String, AsyncProcessExecution>>> receivers = new ArrayList<>();
-          try {
+      // Initialize circuit breaker
+      initializeCircuitBreaker();
 
-            for (int i = 0; i < k; i++) {
-              var receiver = createReceiver(topic, job.isEtapIsregularexp(), config, getGroupId(jobLine), kafkaHost);
+      // Initialize monitoring
+      initializeMonitoring();
 
-              // Create retry policy based on configuration
-              RetryPolicy retryPolicy = new SimpleRetryPolicy(config.getMaxRetries(), config.getRetryDelayMs());
+      // Initialize recovery manager
+      initializeRecoveryManager();
 
-              receiver.subscribe(
-                  new ReceiverRecordConsumer(jobLine.getId() + k, createActionFactory(jobLine.getAction()),
-                      calculateNextTopic(jobLine, jobLines), calculateErrorTopic(job),
-                      convertState(jobLine.getEtapTargetstatus()), kafkaSender, job.getClient().getId(),
-                      job.getOrganization().getId(), retryPolicy, getJobScheduler(job.getId())));
+      // Initialize reconfiguration manager
+      initializeReconfigurationManager();
 
-              receivers.add(receiver);
-            }
-          } catch (Exception e) {
-            log.error("An error has occurred on job line startup {}", e.getMessage());
-            e.printStackTrace();
-          }
-          return Map.entry(jobLine.getId(), receivers);
-        });
-      }).collectMap(Map.Entry::getKey, Map.Entry::getValue).subscribe(
-          flux -> log.info("Created subscribers with advanced configuration {}", flux.keySet()));
+      // Perform initial setup - moved outside circuit breaker due to context requirements
+      performInitialSetup(obProps, kafkaHost);
+
+      isInitialized = true;
+      log.info("Enhanced async process startup completed successfully");
+
     } catch (Exception e) {
-      log.error("An error has occurred on reactor startup", e);
+      log.error("Critical error during startup initialization", e);
+      handleStartupFailure(e);
+    }
+  }
+
+  /**
+   * Initializes the health checker component.
+   */
+  private void initializeHealthChecker(String kafkaHost) {
+    try {
+      healthChecker = new KafkaHealthChecker(kafkaHost, 30, 5000);
+
+      healthChecker.setOnKafkaHealthRestored(() -> {
+        log.info("Kafka health restored - attempting to restart failed consumers");
+        if (isInitialized && recoveryManager != null) {
+          recoveryManager.setRecoveryEnabled(true);
+        }
+      });
+
+      healthChecker.setOnKafkaHealthLost(() -> {
+        log.warn("Kafka health lost - disabling new consumer creation");
+        if (circuitBreaker != null) {
+          circuitBreaker.forceOpen();
+        }
+      });
+
+      healthChecker.start();
+      log.info("Health checker initialized and started");
+
+    } catch (Exception e) {
+      log.error("Failed to initialize health checker", e);
+      throw new RuntimeException("Health checker initialization failed", e);
+    }
+  }
+
+  /**
+   * Initializes the circuit breaker component.
+   */
+  private void initializeCircuitBreaker() {
+    try {
+      KafkaCircuitBreaker.CircuitBreakerConfig config =
+          new KafkaCircuitBreaker.CircuitBreakerConfig(
+              5,                              // failureThreshold - 5 failures
+              java.time.Duration.ofMinutes(2), // timeout - 2 minutes
+              java.time.Duration.ofSeconds(30), // retryInterval - 30 seconds
+              10000,                          // slowCallDurationThreshold - 10 seconds
+              50,                             // slowCallRateThreshold - 50%
+              10                              // minimumNumberOfCalls
+          );
+
+      circuitBreaker = new KafkaCircuitBreaker("async-process-kafka", config);
+
+      circuitBreaker.setStateChangeListener((name, from, to, reason) -> {
+        log.info("Circuit breaker '{}' state changed from {} to {}: {}", name, from, to, reason);
+        if (processMonitor != null) {
+          // Record circuit breaker events in monitoring
+          processMonitor.recordKafkaConnection(to == KafkaCircuitBreaker.State.CLOSED);
+        }
+      });
+
+      log.info("Circuit breaker initialized");
+
+    } catch (Exception e) {
+      log.error("Failed to initialize circuit breaker", e);
+      throw new RuntimeException("Circuit breaker initialization failed", e);
+    }
+  }
+
+  /**
+   * Initializes the monitoring component.
+   */
+  private void initializeMonitoring() {
+    try {
+      processMonitor = new AsyncProcessMonitor(10000, 30000); // 10s metrics, 30s alerts
+
+      // Add alert listener for logging
+      processMonitor.addAlertListener(new AsyncProcessMonitor.AlertListener() {
+        @Override
+        public void onAlert(AsyncProcessMonitor.Alert alert) {
+          log.warn("ALERT [{}]: {} - {}", alert.getSeverity(), alert.getType(), alert.getMessage());
+        }
+
+        @Override
+        public void onAlertResolved(AsyncProcessMonitor.Alert alert) {
+          log.info("ALERT RESOLVED [{}]: {}", alert.getType(), alert.getMessage());
+        }
+      });
+
+      processMonitor.start();
+      log.info("Process monitoring initialized and started");
+
+    } catch (Exception e) {
+      log.error("Failed to initialize process monitoring", e);
+      // Don't fail startup for monitoring issues
+    }
+  }
+
+  /**
+   * Initializes the recovery manager component.
+   */
+  private void initializeRecoveryManager() {
+    try {
+      recoveryManager = new ConsumerRecoveryManager(healthChecker, 5, 10000, 2);
+
+      // Set consumer recreation function
+      recoveryManager.setConsumerRecreationFunction(consumerInfo -> {
+        try {
+          return executeWithClassLoaderContext(() -> 
+              createReceiver(
+                  consumerInfo.getTopic(),
+                  consumerInfo.isRegExp(),
+                  consumerInfo.getConfig(),
+                  consumerInfo.getGroupId(),
+                  consumerInfo.getKafkaHost()
+              )
+          );
+        } catch (Exception e) {
+          log.error("Failed to recreate consumer {}: {}", consumerInfo.getConsumerId(), e.getMessage());
+          throw new RuntimeException("Consumer recreation failed", e);
+        }
+      });
+
+      log.info("Consumer recovery manager initialized");
+
+    } catch (Exception e) {
+      log.error("Failed to initialize recovery manager", e);
+      throw new RuntimeException("Recovery manager initialization failed", e);
+    }
+  }
+
+  /**
+   * Initializes the reconfiguration manager component.
+   */
+  private void initializeReconfigurationManager() {
+    try {
+      reconfigurationManager = new AsyncProcessReconfigurationManager(
+          this, healthChecker, recoveryManager, 60000); // Check every minute
+
+      reconfigurationManager.addConfigurationChangeListener(
+          new AsyncProcessReconfigurationManager.ConfigurationChangeListener() {
+            @Override
+            public void onJobAdded(AsyncProcessReconfigurationManager.JobConfiguration jobConfig) {
+              log.info("Configuration: Job added - {}", jobConfig.getJob().getName());
+            }
+
+            @Override
+            public void onJobRemoved(String jobId) {
+              log.info("Configuration: Job removed - {}", jobId);
+            }
+
+            @Override
+            public void onJobModified(AsyncProcessReconfigurationManager.JobConfiguration oldConfig,
+                AsyncProcessReconfigurationManager.JobConfiguration newConfig) {
+              log.info("Configuration: Job modified - {}", newConfig.getJob().getName());
+            }
+          });
+
+      reconfigurationManager.startMonitoring();
+      log.info("Reconfiguration manager initialized and started");
+
+    } catch (Exception e) {
+      log.error("Failed to initialize reconfiguration manager", e);
+      // Don't fail startup for reconfiguration issues
+    }
+  }
+
+  /**
+   * Performs the initial setup of jobs and consumers.
+   * 
+   * CONTEXT-AWARE CIRCUIT BREAKER SOLUTION:
+   * =====================================
+   * Esta implementación resuelve el problema del contexto de clases cuando se ejecuta código
+   * dentro del circuit breaker. El circuit breaker ejecuta en threads del pool de ForkJoin
+   * que no tienen acceso al contexto de clases de Etendo/Openbravo.
+   * 
+   * ESTRATEGIA IMPLEMENTADA:
+   * 1. FASE DE PRELOAD (Hilo Principal): Se ejecuta en el hilo principal con contexto completo
+   *    - Carga de jobs desde base de datos
+   *    - Pre-carga de action suppliers (createActionFactory)
+   *    - Acceso a OBContext y OBDal
+   * 
+   * 2. FASE KAFKA (Circuit Breaker): Se ejecuta dentro del circuit breaker
+   *    - Operaciones de Kafka (AdminClient, KafkaSender)
+   *    - Creación de topics
+   *    - Procesamiento reactivo con suppliers pre-cargados
+   *    - **PRESERVACIÓN DE CONTEXT**: executeWithClassLoaderContext() asegura que
+   *      las clases de Kafka (StringDeserializer, etc.) estén disponibles
+   * 
+   * BENEFICIOS:
+   * - Evita ClassNotFoundException en threads asíncronos
+   * - Mantiene circuit breaker para operaciones de Kafka
+   * - Mejor rendimiento al pre-cargar classes una sola vez
+   * - Debugging más fácil con errores inmediatos en startup
+   * - **NUEVO**: Contexto de clases preservado para Kafka operations
+   * 
+   * Ejecuta operaciones que requieren contexto de Etendo fuera del circuit breaker,
+   * y luego usa el circuit breaker solo para operaciones de Kafka con contexto preservado.
+   */
+  private void performInitialSetup(Properties obProps, String kafkaHost) {
+    try {
+      // PASO 1: Pre-cargar todo lo que requiere contexto de Etendo (fuera del circuit breaker)
+      log.debug("Starting context-aware preloading phase...");
+      final Map<String, Supplier<Action>> actionSuppliers = preloadActionSuppliers();
+      final List<Job> jobs = loadAsyncJobs();
+      
+      if (jobs.isEmpty()) {
+          log.info("No async process found, reactor will not connect to any topic until restart.");
+          return;
+      }
+      
+      // PASO 2: Crear configuraciones sin contexto
+      log.debug("Creating Kafka configurations...");
+      Properties kafkaProps = getKafkaServerConfigProps(kafkaHost);
+      
+      // PASO 3: Usar circuit breaker solo para operaciones de Kafka
+      log.debug("Starting Kafka operations with circuit breaker protection...");
+      
+      CompletableFuture<Void> setupFuture = circuitBreaker.executeAsync(() -> {
+          return CompletableFuture.runAsync(() -> {
+              executeWithClassLoaderContext(() -> {
+                  try (AdminClient adminKafka = AdminClient.create(kafkaProps)) {
+                      log.debug("Creating Kafka sender...");
+                      KafkaSender<String, AsyncProcessExecution> kafkaSender = crateSender(kafkaHost);
+                      
+                      if (!isAsyncJobsEnabled()) {
+                          log.warn("There are async jobs defined, but Kafka is disabled.");
+                          return null;
+                      }
+                      
+                      log.debug("Creating Kafka topics...");
+                      createKafkaConnectTopics(obProps, adminKafka);
+                      
+                      // Procesar jobs con suppliers pre-cargados
+                      log.debug("Processing jobs with preloaded suppliers...");
+                      processJobsWithPreloadedSuppliers(jobs, adminKafka, kafkaSender, kafkaHost, actionSuppliers);
+                      
+                      return null;
+                  } catch (Exception e) {
+                      log.error("Kafka operation failed during setup", e);
+                      throw new RuntimeException("Kafka setup failed", e);
+                  }
+              });
+          });
+      });
+      
+      // Manejar el resultado de forma síncrona para mantener compatibilidad
+      try {
+          setupFuture.get(30, TimeUnit.SECONDS); // Timeout de 30 segundos
+          log.info("Initial setup completed successfully");
+      } catch (Exception e) {
+          log.error("Initial setup failed within timeout", e);
+          handleSetupFailure(e);
+          // Re-lanzar la excepción para que el startup falle apropiadamente
+          throw new RuntimeException("Initial setup failed", e);
+      }
+      
+    } catch (Exception e) {
+      log.error("Critical error during initial setup", e);
+      throw new RuntimeException("Initial setup failed", e);
+    }
+  }
+
+  /**
+   * Processes a single job with enhanced error handling.
+   */
+private Flux<Map.Entry<String, List<Flux<ReceiverRecord<String, AsyncProcessExecution>>>>> processJob(
+      Job job, AdminClient adminKafka, KafkaSender<String, AsyncProcessExecution> kafkaSender,
+      String kafkaHost, Map<String, Supplier<Action>> actionSuppliers) {
+
+    try {
+      // Configure or create the scheduler for this job
+      configureJobScheduler(job);
+
+      var jobLines = job.getJOBSJobLineList();
+      jobLines.sort(Comparator.comparing(JobLine::getLineNo));
+
+      return Flux.fromStream(jobLines.stream()).map(jobLine -> {
+        try {
+          return processJobLine(job, jobLine, jobLines, adminKafka, kafkaSender, kafkaHost, actionSuppliers);
+        } catch (Exception e) {
+          log.error("Error processing job line {} for job {}: {}", jobLine.getId(), job.getId(), e.getMessage(), e);
+          return Map.entry(jobLine.getId(), new ArrayList<Flux<ReceiverRecord<String, AsyncProcessExecution>>>());
+        }
+      });
+
+    } catch (Exception e) {
+      log.error("Error processing job {}: {}", job.getId(), e.getMessage(), e);
+      return Flux.empty();
+    }
+  }
+
+  /**
+   * Processes a single job line with enhanced error handling.
+   */
+  private Map.Entry<String, List<Flux<ReceiverRecord<String, AsyncProcessExecution>>>> processJobLine(
+      Job job, JobLine jobLine, List<JobLine> jobLines, AdminClient adminKafka,
+      KafkaSender<String, AsyncProcessExecution> kafkaSender, String kafkaHost,
+      Map<String, Supplier<Action>> actionSuppliers) {
+
+    try {
+      // Get the configuration for this job line
+      AsyncProcessConfig config = getJobLineConfig(jobLine);
+
+      String topic = calculateCurrentTopic(jobLine, jobLines);
+      // Validate if the topic exists, if not create it
+      int numPartitions = getNumPartitions();
+      existsOrCreateTopic(adminKafka, topic, numPartitions);
+
+      int k = 1;
+      if ((jobLine.getJobsJob() != null && BooleanUtils.isTrue(jobLine.getJobsJob().isEtapConsumerPerPartition()))
+          || BooleanUtils.isTrue(jobLine.isEtapConsumerPerPartition())) {
+        k = numPartitions;
+      }
+
+      List<Flux<ReceiverRecord<String, AsyncProcessExecution>>> receivers = new ArrayList<>();
+
+      for (int i = 0; i < k; i++) {
+        try {
+          String consumerId = jobLine.getId() + "-" + i;
+          String groupId = getGroupId(jobLine);
+
+          var receiver = createReceiver(topic, job.isEtapIsregularexp(), config, groupId, kafkaHost);
+
+          // Create retry policy based on configuration
+          RetryPolicy retryPolicy = new SimpleRetryPolicy(config.getMaxRetries(), config.getRetryDelayMs());
+
+          Supplier<Action> actionFactory = actionSuppliers.get(jobLine.getId());
+
+          if (actionFactory == null) {
+            log.error("FATAL: No action supplier found for job line {}. Skipping.", jobLine.getId());
+            return Map.entry(jobLine.getId(), new ArrayList<>());
+          }
+          // Create enhanced consumer with monitoring
+          ReceiverRecordConsumer recordConsumer = new ReceiverRecordConsumer(
+              jobLine.getId() + k,
+              actionFactory,
+              calculateNextTopic(jobLine, jobLines),
+              calculateErrorTopic(job),
+              convertState(jobLine.getEtapTargetstatus()),
+              kafkaSender,
+              job.getClient().getId(),
+              job.getOrganization().getId(),
+              retryPolicy,
+              getJobScheduler(job.getId())
+          );
+
+          // Subscribe with error handling and monitoring
+          Disposable subscription = receiver.doOnNext(record -> {
+            // Record consumer activity
+            if (processMonitor != null) {
+              processMonitor.recordConsumerActivity(consumerId, groupId, topic);
+            }
+          }).doOnError(error -> {
+            log.error("Error in consumer {} for topic {}: {}", consumerId, topic, error.getMessage(), error);
+            if (processMonitor != null) {
+              processMonitor.recordConsumerConnectionLost(consumerId);
+            }
+            // Schedule recovery
+            if (recoveryManager != null) {
+              try {
+                scheduleConsumerRecovery(consumerId, groupId, topic, error.getMessage());
+              } catch (Exception e) {
+                log.error("Failed to schedule recovery for consumer {}: {}", consumerId, e.getMessage());
+              }
+            }
+          }).subscribe(recordConsumer);
+
+          activeSubscriptions.put(consumerId, subscription);
+
+          // Register consumer with recovery manager
+          if (recoveryManager != null) {
+            ConsumerRecoveryManager.ConsumerInfo consumerInfo =
+                new ConsumerRecoveryManager.ConsumerInfo(
+                    consumerId, groupId, topic, job.isEtapIsregularexp(), config,
+                    jobLine.getId(), actionFactory,
+                    calculateNextTopic(jobLine, jobLines), calculateErrorTopic(job),
+                    convertState(jobLine.getEtapTargetstatus()), kafkaSender,
+                    job.getClient().getId(), job.getOrganization().getId(),
+                    retryPolicy, getJobScheduler(job.getId()), kafkaHost
+                );
+            consumerInfo.setSubscription(subscription);
+            recoveryManager.registerConsumer(consumerInfo);
+          }
+
+          // Register with health checker
+          if (healthChecker != null) {
+            healthChecker.registerConsumerGroup(groupId);
+          }
+
+          receivers.add(receiver);
+
+        } catch (Exception e) {
+          log.error("An error has occurred creating consumer {} for job line {}: {}", i, jobLine.getId(), e.getMessage(), e);
+        }
+      }
+
+      return Map.entry(jobLine.getId(), receivers);
+
+    } catch (Exception e) {
+      log.error("Error processing job line {}: {}", jobLine.getId(), e.getMessage(), e);
+      return Map.entry(jobLine.getId(), new ArrayList<>());
+    }
+  }
+
+  /**
+   * Schedules consumer recovery.
+   */
+  private void scheduleConsumerRecovery(String consumerId, String groupId, String topic, String reason) {
+    log.info("Scheduling recovery for consumer {} due to: {}", consumerId, reason);
+    // The recovery manager will handle the actual recovery logic
+  }
+
+  /**
+   * Schedules retry setup when initial setup fails.
+   */
+  private void scheduleRetrySetup(Properties obProps, String kafkaHost) {
+    ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor();
+    retryScheduler.schedule(() -> {
+      try {
+        log.info("Retrying async process setup...");
+        circuitBreaker.execute(() -> {
+          performInitialSetup(obProps, kafkaHost);
+          return true;
+        });
+        log.info("Retry setup completed successfully");
+      } catch (Exception e) {
+        log.warn("Retry setup failed, will try again later: {}", e.getMessage());
+        scheduleRetrySetup(obProps, kafkaHost);
+      } finally {
+        retryScheduler.shutdown();
+      }
+    }, 30, TimeUnit.SECONDS);
+  }
+
+  /**
+   * Handles startup failure.
+   */
+  private void handleStartupFailure(Exception e) {
+    log.error("Startup failure - attempting graceful degradation", e);
+
+    // Try to start health checker at minimum
+    try {
+      if (healthChecker == null) {
+        var obProps = OBPropertiesProvider.getInstance().getOpenbravoProperties();
+        String kafkaHost = getKafkaHost(obProps);
+        initializeHealthChecker(kafkaHost);
+      }
+    } catch (Exception healthError) {
+      log.error("Failed to start health checker during failure recovery", healthError);
+    }
+
+    // Don't throw - allow system to continue in degraded mode
+  }
+
+  /**
+   * Handles job processing errors.
+   */
+  private void handleJobProcessingError(Throwable error) {
+    log.error("Job processing error occurred", error);
+
+    if (circuitBreaker != null) {
+      // Open circuit breaker on severe errors
+      if (error instanceof OutOfMemoryError ||
+          error.getMessage().contains("Connection refused") ||
+          error.getMessage().contains("Timeout")) {
+        circuitBreaker.forceOpen();
+      }
+    }
+
+    if (processMonitor != null) {
+      processMonitor.recordKafkaConnection(false);
     }
   }
 
@@ -268,10 +710,12 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
    */
   private void configureJobScheduler(Job job) {
     int threads = getJobParallelThreads(job);
-    ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(threads);
-    jobSchedulers.put(job.getId(), scheduler);
-    log.info("Configured scheduler for job {} with {} threads", job.getId(), threads);
+    jobSchedulers.computeIfAbsent(job.getId(), k -> {
+      log.info("Configuring scheduler for job {} with {} threads", job.getId(), threads);
+      return Executors.newScheduledThreadPool(threads);
+    });
   }
+
 
   /**
    * Gets the scheduler for a specific job.
@@ -355,29 +799,16 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   private AsyncProcessState convertState(String status) {
-    var state = AsyncProcessState.STARTED;
-    if (!StringUtils.isEmpty(status)) {
-      switch (status) {
-        case "WAITING":
-          state = AsyncProcessState.WAITING;
-          break;
-        case "ACCEPTED":
-          state = AsyncProcessState.ACCEPTED;
-          break;
-        case "DONE":
-          state = AsyncProcessState.DONE;
-          break;
-        case "REJECTED":
-          state = AsyncProcessState.REJECTED;
-          break;
-        case "ERROR":
-          state = AsyncProcessState.ERROR;
-          break;
-        default:
-      }
+    if (StringUtils.isEmpty(status)) {
+      return AsyncProcessState.STARTED;
     }
-    return state;
+    try {
+      return AsyncProcessState.valueOf(status);
+    } catch (IllegalArgumentException e) {
+      return AsyncProcessState.STARTED;
+    }
   }
+
 
   /**
    * Method called to create a consumer based on configured actions.
@@ -479,11 +910,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
     props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
     props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, AsyncProcessExecutionDeserializer.class.getName());
-
-    // Configure prefetch count
-    props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
-
-    // Configure prefetch
     props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, config.getPrefetchCount());
 
     var receiverOptions = ReceiverOptions.<String, AsyncProcessExecution>create(props);
@@ -601,20 +1027,217 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   }
 
   /**
-   * Method to clean up service resources.
+   * Enhanced shutdown method with proper cleanup of all components.
    */
   public void shutdown() {
-    log.info("Shutting down AsyncProcessStartup...");
-    for (ScheduledExecutorService scheduler : jobSchedulers.values()) {
-      try {
-        scheduler.shutdown();
-        if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
-          scheduler.shutdownNow();
+    log.info("Shutting down Enhanced AsyncProcessStartup...");
+
+    try {
+      if (reconfigurationManager != null) reconfigurationManager.stopMonitoring();
+      if (processMonitor != null) processMonitor.stop();
+      if (healthChecker != null) healthChecker.stop();
+      if (recoveryManager != null) recoveryManager.shutdown();
+      if (circuitBreaker != null) circuitBreaker.shutdown();
+
+      activeSubscriptions.values().forEach(subscription -> {
+        try {
+          if (!subscription.isDisposed()) subscription.dispose();
+        } catch (Exception e) {
+          log.warn("Error disposing subscription: {}", e.getMessage());
         }
-      } catch (InterruptedException e) {
-        scheduler.shutdownNow();
-        Thread.currentThread().interrupt();
+      });
+      activeSubscriptions.clear();
+
+      for (ScheduledExecutorService scheduler : jobSchedulers.values()) {
+        try {
+          scheduler.shutdown();
+          if (!scheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+            scheduler.shutdownNow();
+          }
+        } catch (InterruptedException e) {
+          scheduler.shutdownNow();
+          Thread.currentThread().interrupt();
+        }
       }
+      jobSchedulers.clear();
+      log.info("Enhanced AsyncProcessStartup shutdown completed");
+    } catch (Exception e) {
+      log.error("Error during enhanced shutdown", e);
+    }
+  }
+
+  /**
+   * Gets the status of the async process system.
+   */
+  public Map<String, Object> getSystemStatus() {
+    Map<String, Object> status = new HashMap<>();
+    status.put("initialized", isInitialized);
+    status.put("activeJobs", jobSchedulers.size());
+    status.put("activeSubscriptions", activeSubscriptions.size());
+    if (healthChecker != null) {
+      status.put("kafkaHealthy", healthChecker.isKafkaHealthy());
+      status.put("healthReport", healthChecker.getHealthReport());
+    }
+    if (circuitBreaker != null) {
+      status.put("circuitBreakerState", circuitBreaker.getState());
+      status.put("circuitBreakerMetrics", circuitBreaker.getMetrics());
+    }
+    if (recoveryManager != null) status.put("recoveryStatus", recoveryManager.getRecoveryStatus());
+    if (reconfigurationManager != null) status.put("configurationStatus", reconfigurationManager.getConfigurationStatus());
+    if (processMonitor != null) status.put("monitoringReport", processMonitor.getStatusReport());
+    return status;
+  }
+
+  /**
+   * Forces a system health check and recovery if needed.
+   */
+  public void forceHealthCheck() {
+    log.info("Forcing system health check...");
+    if (healthChecker != null) {
+      log.info("Health checker status: {}", healthChecker.isKafkaHealthy());
+    }
+    if (recoveryManager != null && healthChecker != null && healthChecker.isKafkaHealthy()) {
+      recoveryManager.setRecoveryEnabled(true);
+    }
+    if (reconfigurationManager != null) {
+      reconfigurationManager.forceConfigurationReload();
+    }
+  }
+
+  /**
+   * Manually triggers recovery for a specific consumer.
+   */
+  public void forceConsumerRecovery(String consumerId) {
+    if (recoveryManager != null) {
+      try {
+        recoveryManager.forceRecoverConsumer(consumerId);
+        log.info("Forced recovery completed for consumer: {}", consumerId);
+      } catch (Exception e) {
+        log.error("Failed to force recovery for consumer {}: {}", consumerId, e.getMessage(), e);
+        throw e;
+      }
+    } else {
+      throw new IllegalStateException("Recovery manager not initialized");
+    }
+  }
+
+  /**
+   * Pre-carga los action suppliers en el contexto principal.
+   * Este método debe ejecutarse en el hilo principal para tener acceso al contexto de Etendo.
+   */
+  private Map<String, Supplier<Action>> preloadActionSuppliers() {
+    final Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    
+    try {
+        OBContext.setOBContext("100", "0", "0", "0");
+        
+        var critJob = OBDal.getInstance().createCriteria(Job.class);
+        critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
+        List<Job> jobs = critJob.list();
+        
+        log.info("Pre-loading action suppliers for {} jobs...", jobs.size());
+        for (Job job : jobs) {
+            for (JobLine jobLine : job.getJOBSJobLineList()) {
+                try {
+                    Supplier<Action> supplier = createActionFactory(jobLine.getAction());
+                    actionSuppliers.put(jobLine.getId(), supplier);
+                } catch (ClassNotFoundException e) {
+                    log.error("CRITICAL: Could not load class for job line {}. This job will not work.", 
+                             jobLine.getId(), e);
+                    throw new RuntimeException("Failed to pre-load action class", e);
+                }
+            }
+        }
+        log.info("Successfully pre-loaded {} action suppliers.", actionSuppliers.size());
+        
+    } finally {
+        OBContext.restorePreviousMode();
+    }
+    
+    return actionSuppliers;
+  }
+
+  /**
+   * Carga la lista de jobs asincrónicos.
+   * Este método debe ejecutarse en el hilo principal para tener acceso al contexto de Etendo.
+   */
+  private List<Job> loadAsyncJobs() {
+    try {
+        OBContext.setOBContext("100", "0", "0", "0");
+        
+        var critJob = OBDal.getInstance().createCriteria(Job.class);
+        critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
+        return critJob.list();
+        
+    } finally {
+        OBContext.restorePreviousMode();
+    }
+  }
+
+  /**
+   * Procesa jobs con suppliers pre-cargados.
+   * Este método no requiere contexto de Etendo ya que todos los suppliers están pre-cargados.
+   */
+  private void processJobsWithPreloadedSuppliers(List<Job> jobs, AdminClient adminKafka, 
+                                                KafkaSender<String, AsyncProcessExecution> kafkaSender, 
+                                                String kafkaHost, Map<String, Supplier<Action>> actionSuppliers) {
+    log.info("Found {} async jobs to start", jobs.size());
+    
+    Flux.fromStream(jobs.stream())
+        .flatMap(job -> processJob(job, adminKafka, kafkaSender, kafkaHost, actionSuppliers))
+        .collectMap(Map.Entry::getKey, Map.Entry::getValue)
+        .subscribe(
+            flux -> {
+                log.info("Created subscribers with enhanced resilience for jobs: {}", flux.keySet());
+                if (processMonitor != null) {
+                    flux.keySet().forEach(jobId -> processMonitor.recordJobExecution(jobId, "Job started", 0, true, false));
+                }
+            },
+            error -> {
+                log.error("Error during job processing", error);
+                handleJobProcessingError(error);
+            }
+        );
+  }
+
+  /**
+   * Maneja errores de configuración inicial.
+   */
+  private void handleSetupFailure(Throwable throwable) {
+    log.error("Initial setup failed: {}", throwable.getMessage(), throwable);
+    
+    // Notificar al monitor si está disponible
+    if (processMonitor != null) {
+        // Usar recordJobExecution para registrar el error de setup
+        processMonitor.recordJobExecution("SYSTEM_SETUP", "Initial Setup Failed", 0, false, false);
+    }
+    
+    // Intentar recovery si es posible
+    if (recoveryManager != null && recoveryManager.isRecoveryEnabled()) {
+        log.info("Attempting recovery after setup failure...");
+        // El recovery manager manejará la recuperación cuando Kafka esté disponible
+    }
+  }
+
+  /**
+   * Ejecuta una operación preservando el contexto de clases actual.
+   * Útil para operaciones que se ejecutan en threads del pool que pueden perder el contexto.
+   */
+  private <T> T executeWithClassLoaderContext(Supplier<T> operation) {
+    final ClassLoader currentClassLoader = Thread.currentThread().getContextClassLoader();
+    final ClassLoader applicationClassLoader = this.getClass().getClassLoader();
+    
+    try {
+      // Asegurar que tenemos el contexto de clases correcto
+      if (currentClassLoader == null || currentClassLoader != applicationClassLoader) {
+        Thread.currentThread().setContextClassLoader(applicationClassLoader);
+      }
+      
+      return operation.get();
+      
+    } finally {
+      // Restaurar el contexto original
+      Thread.currentThread().setContextClassLoader(currentClassLoader);
     }
   }
 }

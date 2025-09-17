@@ -49,6 +49,14 @@
         <default/>
         <onCreateDefault/>
       </column>
+      <column name="OBUIAPP_PROCESS_ID" primaryKey="false" required="false" type="VARCHAR" size="32" autoIncrement="false">
+        <default/>
+        <onCreateDefault/>
+      </column>
+      <column name="LINENO" primaryKey="false" required="false" type="DECIMAL" size="10,0" autoIncrement="false">
+        <default/>
+        <onCreateDefault/>
+      </column>
       <foreign-key foreignTable="AD_CLIENT" name="ETAP_LOG_AD_CLIENT">
         <reference local="AD_CLIENT_ID" foreign="AD_CLIENT_ID"/>
       </foreign-key>
@@ -57,6 +65,9 @@
       </foreign-key>
       <foreign-key foreignTable="ETAP_LOG_HEADER" name="ETAP_LOG_LOG_HEADER">
         <reference local="ETAP_LOG_HEADER_ID" foreign="ETAP_LOG_HEADER_ID"/>
+      </foreign-key>
+      <foreign-key foreignTable="OBUIAPP_PROCESS" name="ETAP_LOG_PROC">
+        <reference local="OBUIAPP_PROCESS_ID" foreign="OBUIAPP_PROCESS_ID"/>
       </foreign-key>
       <check name="ETAP_LOG_ISACTIVE_CHK"><![CDATA[ISACTIVE IN ('Y', 'N')]]></check>
     </table>
