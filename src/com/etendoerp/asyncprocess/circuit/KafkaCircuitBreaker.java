@@ -118,20 +118,63 @@ public class KafkaCircuitBreaker {
     private final LocalDateTime lastFailureTime;
     private final LocalDateTime lastSuccessTime;
     
-    public CircuitBreakerMetrics(int totalCalls, int failureCount, int successCount, int slowCallCount,
-                                double failureRate, double slowCallRate, State state,
-                                LocalDateTime lastFailureTime, LocalDateTime lastSuccessTime) {
-      this.totalCalls = totalCalls;
-      this.failureCount = failureCount;
-      this.successCount = successCount;
-      this.slowCallCount = slowCallCount;
-      this.failureRate = failureRate;
-      this.slowCallRate = slowCallRate;
-      this.state = state;
-      this.lastFailureTime = lastFailureTime;
-      this.lastSuccessTime = lastSuccessTime;
+    /**
+     * Helper class to group call counts and rates
+     */
+    public static class CallMetrics {
+      private final int totalCalls;
+      private final int failureCount;
+      private final int successCount;
+      private final int slowCallCount;
+      private final double failureRate;
+      private final double slowCallRate;
+
+      public CallMetrics(int totalCalls, int failureCount, int successCount, int slowCallCount,
+                        double failureRate, double slowCallRate) {
+        this.totalCalls = totalCalls;
+        this.failureCount = failureCount;
+        this.successCount = successCount;
+        this.slowCallCount = slowCallCount;
+        this.failureRate = failureRate;
+        this.slowCallRate = slowCallRate;
+      }
+
+      public int getTotalCalls() { return totalCalls; }
+      public int getFailureCount() { return failureCount; }
+      public int getSuccessCount() { return successCount; }
+      public int getSlowCallCount() { return slowCallCount; }
+      public double getFailureRate() { return failureRate; }
+      public double getSlowCallRate() { return slowCallRate; }
+    }
+
+    /**
+     * Helper class to group timestamp information
+     */
+    public static class TimestampInfo {
+      private final LocalDateTime lastFailureTime;
+      private final LocalDateTime lastSuccessTime;
+
+      public TimestampInfo(LocalDateTime lastFailureTime, LocalDateTime lastSuccessTime) {
+        this.lastFailureTime = lastFailureTime;
+        this.lastSuccessTime = lastSuccessTime;
+      }
+
+      public LocalDateTime getLastFailureTime() { return lastFailureTime; }
+      public LocalDateTime getLastSuccessTime() { return lastSuccessTime; }
     }
     
+    public CircuitBreakerMetrics(CallMetrics callMetrics, State state, TimestampInfo timestampInfo) {
+      this.totalCalls = callMetrics.getTotalCalls();
+      this.failureCount = callMetrics.getFailureCount();
+      this.successCount = callMetrics.getSuccessCount();
+      this.slowCallCount = callMetrics.getSlowCallCount();
+      this.failureRate = callMetrics.getFailureRate();
+      this.slowCallRate = callMetrics.getSlowCallRate();
+      this.state = state;
+      this.lastFailureTime = timestampInfo.getLastFailureTime();
+      this.lastSuccessTime = timestampInfo.getLastSuccessTime();
+    }
+
     // Getters
     public int getTotalCalls() { return totalCalls; }
     public int getFailureCount() { return failureCount; }
@@ -246,10 +289,8 @@ public class KafkaCircuitBreaker {
     }
     
     // If we're in half-open state and getting successes, consider closing
-    if (state.get() == State.HALF_OPEN) {
-      if (successCount.get() >= config.getMinimumNumberOfCalls()) {
-        transitionToClosed();
-      }
+    if (state.get() == State.HALF_OPEN && successCount.get() >= config.getMinimumNumberOfCalls()) {
+      transitionToClosed();
     }
   }
   
@@ -409,9 +450,12 @@ public class KafkaCircuitBreaker {
     LocalDateTime lastSuccess = lastSuccessTime.get() > 0 ? 
         LocalDateTime.now().minus(Duration.ofMillis(System.currentTimeMillis() - lastSuccessTime.get())) : null;
     
-    return new CircuitBreakerMetrics(total, failures, successes, slowCalls, 
-                                   failureRate, slowCallRate, state.get(), 
-                                   lastFailure, lastSuccess);
+    CircuitBreakerMetrics.CallMetrics callMetrics = new CircuitBreakerMetrics.CallMetrics(
+        total, failures, successes, slowCalls, failureRate, slowCallRate);
+    CircuitBreakerMetrics.TimestampInfo timestampInfo = new CircuitBreakerMetrics.TimestampInfo(
+        lastFailure, lastSuccess);
+
+    return new CircuitBreakerMetrics(callMetrics, state.get(), timestampInfo);
   }
   
   /**

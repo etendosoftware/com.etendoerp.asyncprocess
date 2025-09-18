@@ -23,7 +23,8 @@ public class AsyncProcessMonitor {
   private static final Logger log = LogManager.getLogger();
   private static final long DEFAULT_METRICS_COLLECTION_INTERVAL_MS = 10000; // 10 seconds
   private static final long DEFAULT_ALERT_CHECK_INTERVAL_MS = 30000; // 30 seconds
-  
+  public static final String NUMBER_FORMAT = "%.2f%%";
+
   // Metrics storage
   private final Map<String, JobMetrics> jobMetrics = new ConcurrentHashMap<>();
   private final Map<String, ConsumerMetrics> consumerMetrics = new ConcurrentHashMap<>();
@@ -773,7 +774,7 @@ public class AsyncProcessMonitor {
     jobMetrics.forEach((id, metrics) -> {
       report.append("  ").append(metrics.getJobName()).append(" (").append(id).append(")\n");
       report.append("    Processed: ").append(metrics.getMessagesProcessed()).append("\n");
-      report.append("    Success Rate: ").append(String.format("%.2f%%", metrics.getSuccessRate())).append("\n");
+      report.append("    Success Rate: ").append(String.format(NUMBER_FORMAT, metrics.getSuccessRate())).append("\n");
       report.append("    Avg Processing Time: ").append(metrics.getAverageProcessingTime()).append("ms\n");
     });
     
@@ -788,13 +789,13 @@ public class AsyncProcessMonitor {
     
     // Kafka metrics
     report.append("Kafka:\n");
-    report.append("  Connection Success Rate: ").append(String.format("%.2f%%", kafkaMetrics.getConnectionSuccessRate())).append("\n");
-    report.append("  Send Success Rate: ").append(String.format("%.2f%%", kafkaMetrics.getSendSuccessRate())).append("\n");
+    report.append("  Connection Success Rate: ").append(String.format(NUMBER_FORMAT, kafkaMetrics.getConnectionSuccessRate())).append("\n");
+    report.append("  Send Success Rate: ").append(String.format(NUMBER_FORMAT, kafkaMetrics.getSendSuccessRate())).append("\n");
     report.append("  Messages Sent: ").append(kafkaMetrics.getMessagesSent()).append("\n");
     
     // System metrics
     report.append("System:\n");
-    report.append("  Heap Usage: ").append(String.format("%.2f%%", systemMetrics.getHeapUsagePercent())).append("\n");
+    report.append("  Heap Usage: ").append(String.format(NUMBER_FORMAT, systemMetrics.getHeapUsagePercent())).append("\n");
     report.append("  Active Threads: ").append(systemMetrics.getActiveThreads()).append("\n");
     
     // Active alerts

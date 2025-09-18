@@ -1,7 +1,6 @@
 package com.etendoerp.asyncprocess.util;
 
 import com.smf.jobs.model.Job;
-import com.smf.jobs.model.JobLine;
 
 public class TopicUtil {
   private TopicUtil() {

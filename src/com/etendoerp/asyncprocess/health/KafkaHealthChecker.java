@@ -136,8 +136,9 @@ public class KafkaHealthChecker {
         scheduler.shutdownNow();
       }
     } catch (InterruptedException e) {
+      log.warn("Health checker shutdown was interrupted");
       scheduler.shutdownNow();
-      Thread.currentThread().interrupt();
+      Thread.currentThread().interrupt(); // Re-interrupt the thread
     }
   }
   
@@ -173,8 +174,12 @@ public class KafkaHealthChecker {
       boolean healthy = healthCheck.get(timeoutMs + 1000, TimeUnit.MILLISECONDS);
       updateKafkaHealth(healthy);
       
+    } catch (InterruptedException e) {
+      log.warn("Health check was interrupted");
+      updateKafkaHealth(false);
+      Thread.currentThread().interrupt(); // Re-interrupt the thread
     } catch (Exception e) {
-      log.warn("Health check interrupted or failed: {}", e.getMessage());
+      log.warn("Health check failed: {}", e.getMessage());
       updateKafkaHealth(false);
     }
   }
@@ -186,27 +191,42 @@ public class KafkaHealthChecker {
     boolean wasHealthy = isKafkaHealthy.getAndSet(healthy);
     
     if (healthy) {
-      lastSuccessfulCheck.set(System.currentTimeMillis());
-      if (!wasHealthy) {
-        log.info("Kafka connectivity restored");
-        if (onKafkaHealthRestored != null) {
-          try {
-            onKafkaHealthRestored.run();
-          } catch (Exception e) {
-            log.error("Error in health restored callback", e);
-          }
-        }
-      }
+      handleHealthRestored(wasHealthy);
     } else {
-      if (wasHealthy) {
-        log.warn("Kafka connectivity lost");
-        if (onKafkaHealthLost != null) {
-          try {
-            onKafkaHealthLost.run();
-          } catch (Exception e) {
-            log.error("Error in health lost callback", e);
-          }
-        }
+      handleHealthLost(wasHealthy);
+    }
+  }
+
+  /**
+   * Handles the case when Kafka health is restored.
+   */
+  private void handleHealthRestored(boolean wasHealthy) {
+    lastSuccessfulCheck.set(System.currentTimeMillis());
+    if (!wasHealthy) {
+      log.info("Kafka connectivity restored");
+      executeCallback(onKafkaHealthRestored, "health restored callback");
+    }
+  }
+
+  /**
+   * Handles the case when Kafka health is lost.
+   */
+  private void handleHealthLost(boolean wasHealthy) {
+    if (wasHealthy) {
+      log.warn("Kafka connectivity lost");
+      executeCallback(onKafkaHealthLost, "health lost callback");
+    }
+  }
+
+  /**
+   * Safely executes a callback with error handling.
+   */
+  private void executeCallback(Runnable callback, String callbackName) {
+    if (callback != null) {
+      try {
+        callback.run();
+      } catch (Exception e) {
+        log.error("Error in {}", callbackName, e);
       }
     }
   }
@@ -233,6 +253,9 @@ public class KafkaHealthChecker {
         });
         
       }
+    } catch (InterruptedException e) {
+      log.warn("Consumer groups check was interrupted");
+      Thread.currentThread().interrupt(); // Re-interrupt the thread
     } catch (Exception e) {
       log.warn("Failed to check consumer groups: {}", e.getMessage());
     }
@@ -272,6 +295,14 @@ public class KafkaHealthChecker {
         consumerHealthListener.onConsumerHealthy(groupId);
       }
       
+    } catch (InterruptedException e) {
+      log.warn("Consumer group health check was interrupted for group: {}", groupId);
+      ConsumerHealthStatus status = consumerHealthStatus.get(groupId);
+      if (status != null) {
+        status.setHealthy(false);
+        status.setLastError("Check interrupted");
+      }
+      Thread.currentThread().interrupt(); // Re-interrupt the thread
     } catch (Exception e) {
       log.debug("Failed to check consumer group {}: {}", groupId, e.getMessage());
       ConsumerHealthStatus status = consumerHealthStatus.get(groupId);

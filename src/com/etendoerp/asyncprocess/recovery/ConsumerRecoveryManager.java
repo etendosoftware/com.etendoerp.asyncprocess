@@ -24,6 +24,7 @@ import com.etendoerp.asyncprocess.model.AsyncProcessState;
 import com.etendoerp.asyncprocess.retry.RetryPolicy;
 import com.smf.jobs.Action;
 
+import org.openbravo.base.exception.OBException;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.ReceiverRecord;
@@ -78,27 +79,146 @@ public class ConsumerRecoveryManager {
     private Disposable subscription;
     private boolean isActive = true;
     
-    public ConsumerInfo(String consumerId, String groupId, String topic, boolean isRegExp,
-                       AsyncProcessConfig config, String jobLineId, Supplier<Action> actionFactory,
-                       String nextTopic, String errorTopic, AsyncProcessState targetStatus,
-                       KafkaSender<String, AsyncProcessExecution> kafkaSender, String clientId, String orgId,
-                       RetryPolicy retryPolicy, ScheduledExecutorService scheduler, String kafkaHost) {
-      this.consumerId = consumerId;
-      this.groupId = groupId;
-      this.topic = topic;
-      this.isRegExp = isRegExp;
-      this.config = config;
-      this.jobLineId = jobLineId;
-      this.actionFactory = actionFactory;
-      this.nextTopic = nextTopic;
-      this.errorTopic = errorTopic;
-      this.targetStatus = targetStatus;
-      this.kafkaSender = kafkaSender;
-      this.clientId = clientId;
-      this.orgId = orgId;
-      this.retryPolicy = retryPolicy;
-      this.scheduler = scheduler;
-      this.kafkaHost = kafkaHost;
+    private ConsumerInfo(Builder builder) {
+      this.consumerId = builder.consumerId;
+      this.groupId = builder.groupId;
+      this.topic = builder.topic;
+      this.isRegExp = builder.isRegExp;
+      this.config = builder.config;
+      this.jobLineId = builder.jobLineId;
+      this.actionFactory = builder.actionFactory;
+      this.nextTopic = builder.nextTopic;
+      this.errorTopic = builder.errorTopic;
+      this.targetStatus = builder.targetStatus;
+      this.kafkaSender = builder.kafkaSender;
+      this.clientId = builder.clientId;
+      this.orgId = builder.orgId;
+      this.retryPolicy = builder.retryPolicy;
+      this.scheduler = builder.scheduler;
+      this.kafkaHost = builder.kafkaHost;
+    }
+
+    public static class Builder {
+      private String consumerId;
+      private String groupId;
+      private String topic;
+      private boolean isRegExp;
+      private AsyncProcessConfig config;
+      private String jobLineId;
+      private Supplier<Action> actionFactory;
+      private String nextTopic;
+      private String errorTopic;
+      private AsyncProcessState targetStatus;
+      private KafkaSender<String, AsyncProcessExecution> kafkaSender;
+      private String clientId;
+      private String orgId;
+      private RetryPolicy retryPolicy;
+      private ScheduledExecutorService scheduler;
+      private String kafkaHost;
+
+      public Builder consumerId(String consumerId) {
+        this.consumerId = consumerId;
+        return this;
+      }
+
+      public Builder groupId(String groupId) {
+        this.groupId = groupId;
+        return this;
+      }
+
+      public Builder topic(String topic) {
+        this.topic = topic;
+        return this;
+      }
+
+      public Builder isRegExp(boolean isRegExp) {
+        this.isRegExp = isRegExp;
+        return this;
+      }
+
+      public Builder config(AsyncProcessConfig config) {
+        this.config = config;
+        return this;
+      }
+
+      public Builder jobLineId(String jobLineId) {
+        this.jobLineId = jobLineId;
+        return this;
+      }
+
+      public Builder actionFactory(Supplier<Action> actionFactory) {
+        this.actionFactory = actionFactory;
+        return this;
+      }
+
+      public Builder nextTopic(String nextTopic) {
+        this.nextTopic = nextTopic;
+        return this;
+      }
+
+      public Builder errorTopic(String errorTopic) {
+        this.errorTopic = errorTopic;
+        return this;
+      }
+
+      public Builder targetStatus(AsyncProcessState targetStatus) {
+        this.targetStatus = targetStatus;
+        return this;
+      }
+
+      public Builder kafkaSender(KafkaSender<String, AsyncProcessExecution> kafkaSender) {
+        this.kafkaSender = kafkaSender;
+        return this;
+      }
+
+      public Builder clientId(String clientId) {
+        this.clientId = clientId;
+        return this;
+      }
+
+      public Builder orgId(String orgId) {
+        this.orgId = orgId;
+        return this;
+      }
+
+      public Builder retryPolicy(RetryPolicy retryPolicy) {
+        this.retryPolicy = retryPolicy;
+        return this;
+      }
+
+      public Builder scheduler(ScheduledExecutorService scheduler) {
+        this.scheduler = scheduler;
+        return this;
+      }
+
+      public Builder kafkaHost(String kafkaHost) {
+        this.kafkaHost = kafkaHost;
+        return this;
+      }
+
+      public ConsumerInfo build() {
+        // Validate required fields
+        if (consumerId == null || consumerId.trim().isEmpty()) {
+          throw new IllegalArgumentException("consumerId is required");
+        }
+        if (groupId == null || groupId.trim().isEmpty()) {
+          throw new IllegalArgumentException("groupId is required");
+        }
+        if (topic == null || topic.trim().isEmpty()) {
+          throw new IllegalArgumentException("topic is required");
+        }
+        if (jobLineId == null || jobLineId.trim().isEmpty()) {
+          throw new IllegalArgumentException("jobLineId is required");
+        }
+        if (actionFactory == null) {
+          throw new IllegalArgumentException("actionFactory is required");
+        }
+        if (kafkaSender == null) {
+          throw new IllegalArgumentException("kafkaSender is required");
+        }
+
+        return new ConsumerInfo(this);
+      }
     }
     
     // Getters
@@ -169,9 +289,8 @@ public class ConsumerRecoveryManager {
       }
     });
     
-    healthChecker.setOnKafkaHealthLost(() -> {
-      log.warn("Kafka health lost. Consumer recovery will be delayed until Kafka is restored.");
-    });
+    healthChecker.setOnKafkaHealthLost(() ->
+        log.warn("Kafka health lost. Consumer recovery will be delayed until Kafka is restored."));
   }
   
   /**
@@ -241,7 +360,7 @@ public class ConsumerRecoveryManager {
    * Calculates recovery delay with exponential backoff.
    */
   private long calculateRecoveryDelay(int attempt) {
-    return baseRecoveryDelayMs * (long) Math.pow(recoveryBackoffMultiplier, attempt - 1);
+    return baseRecoveryDelayMs * (long) Math.pow(recoveryBackoffMultiplier, attempt - 1f);
   }
   
   /**
@@ -300,16 +419,18 @@ public class ConsumerRecoveryManager {
       // Subscribe with new consumer
       Disposable newSubscription = receiver.subscribe(
           new ReceiverRecordConsumer(
-              consumerInfo.getJobLineId(),
-              consumerInfo.getActionFactory(),
-              consumerInfo.getNextTopic(),
-              consumerInfo.getErrorTopic(),
-              consumerInfo.getTargetStatus(),
-              consumerInfo.getKafkaSender(),
-              consumerInfo.getClientId(),
-              consumerInfo.getOrgId(),
-              consumerInfo.getRetryPolicy(),
-              consumerInfo.getScheduler()
+              new ReceiverRecordConsumer.ConsumerConfig.Builder()
+                  .jobId(consumerInfo.getJobLineId())
+                  .actionFactory(consumerInfo.getActionFactory())
+                  .nextTopic(consumerInfo.getNextTopic())
+                  .errorTopic(consumerInfo.getErrorTopic())
+                  .targetStatus(consumerInfo.getTargetStatus())
+                  .kafkaSender(consumerInfo.getKafkaSender())
+                  .clientId(consumerInfo.getClientId())
+                  .orgId(consumerInfo.getOrgId())
+                  .retryPolicy(consumerInfo.getRetryPolicy())
+                  .scheduler(consumerInfo.getScheduler())
+                  .build()
           ),
           error -> {
             log.error("Error in recovered consumer {}: {}", consumerInfo.getConsumerId(), error.getMessage(), error);
@@ -338,7 +459,7 @@ public class ConsumerRecoveryManager {
   private void recoverAllInactiveConsumers() {
     log.info("Checking for inactive consumers to recover...");
     
-    CompletableFuture.runAsync(() -> {
+    CompletableFuture.runAsync(() ->
       activeConsumers.values().stream()
           .filter(consumer -> !consumer.isActive() || 
                             (consumer.getSubscription() != null && consumer.getSubscription().isDisposed()))
@@ -349,8 +470,7 @@ public class ConsumerRecoveryManager {
               log.error("Failed to auto-recover consumer {}: {}", 
                        consumer.getConsumerId(), e.getMessage(), e);
             }
-          });
-    }, recoveryScheduler);
+          }), recoveryScheduler);
   }
   
   /**
@@ -418,7 +538,7 @@ public class ConsumerRecoveryManager {
       recoverConsumer(consumerInfo, "Manual recovery request");
     } catch (Exception e) {
       log.error("Failed to force recover consumer {}: {}", consumerId, e.getMessage(), e);
-      throw new RuntimeException("Recovery failed", e);
+      throw new OBException("Recovery failed", e);
     }
   }
   
