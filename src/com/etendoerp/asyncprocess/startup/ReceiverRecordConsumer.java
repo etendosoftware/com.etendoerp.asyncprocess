@@ -39,7 +39,8 @@ import reactor.kafka.sender.SenderRecord;
  * Enhanced class that encapsulates all necessary objects to receive a message,
  * call the consumer, and respond based on the result, with support for retries and parallel processing.
  */
-public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
+public class ReceiverRecordConsumer
+    implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
   private static final Logger logger = LogManager.getLogger();
 
   // Configuration container to reduce constructor parameters
@@ -162,16 +163,45 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
     }
 
     // Getters
-    public String getJobId() { return jobId; }
-    public Supplier<Action> getActionFactory() { return actionFactory; }
-    public String getNextTopic() { return nextTopic; }
-    public String getErrorTopic() { return errorTopic; }
-    public AsyncProcessState getTargetStatus() { return targetStatus; }
-    public KafkaSender<String, AsyncProcessExecution> getKafkaSender() { return kafkaSender; }
-    public String getClientId() { return clientId; }
-    public String getOrgId() { return orgId; }
-    public RetryPolicy getRetryPolicy() { return retryPolicy; }
-    public ScheduledExecutorService getScheduler() { return scheduler; }
+    public String getJobId() {
+      return jobId;
+    }
+
+    public Supplier<Action> getActionFactory() {
+      return actionFactory;
+    }
+
+    public String getNextTopic() {
+      return nextTopic;
+    }
+
+    public String getErrorTopic() {
+      return errorTopic;
+    }
+
+    public AsyncProcessState getTargetStatus() {
+      return targetStatus;
+    }
+
+    public KafkaSender<String, AsyncProcessExecution> getKafkaSender() {
+      return kafkaSender;
+    }
+
+    public String getClientId() {
+      return clientId;
+    }
+
+    public String getOrgId() {
+      return orgId;
+    }
+
+    public RetryPolicy getRetryPolicy() {
+      return retryPolicy;
+    }
+
+    public ScheduledExecutorService getScheduler() {
+      return scheduler;
+    }
   }
 
   private final ConsumerConfig config;
@@ -179,8 +209,7 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Extended constructor with support for advanced configuration
    */
-  public ReceiverRecordConsumer(
-      ConsumerConfig config) {
+  public ReceiverRecordConsumer(ConsumerConfig config) {
     this.config = config;
   }
 
@@ -194,10 +223,12 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
 
   /**
    * Processes a record with retry support
+   *
    * @param receiverRecord The record to process
-   * @param attemptNumber The current attempt number
+   * @param attemptNumber  The current attempt number
    */
-  private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord, int attemptNumber) {
+  private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
+      int attemptNumber) {
     var value = receiverRecord.value();
     AsyncProcessExecution responseRecord = createInitialResponseRecord(value, receiverRecord.key());
     String log = value == null ? StringUtils.EMPTY : value.getLog();
@@ -210,8 +241,14 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
 
       JSONObject params = parseAndSetupParams(receiverRecord, attemptNumber);
       log = updateLogWithRetryInfo(log, attemptNumber);
-
-      ActionResult result = executeAction(params);
+      ActionResult result;
+      try {
+        result = executeAction(params);
+      } catch (Exception e) {
+        result = new ActionResult();
+        result.setType(ActionResult.Type.ERROR);
+        result.setMessage("Unexpected error: " + e.getMessage());
+      }
       params = enrichParamsWithActionResult(params, result);
       log = updateLogWithResult(log, result);
 
@@ -243,7 +280,8 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Creates initial response record from received data
    */
-  private AsyncProcessExecution createInitialResponseRecord(AsyncProcessExecution value, String key) {
+  private AsyncProcessExecution createInitialResponseRecord(AsyncProcessExecution value,
+      String key) {
     AsyncProcessExecution responseRecord = new AsyncProcessExecution();
     responseRecord.setDescription(value == null ? StringUtils.EMPTY : value.getDescription());
     responseRecord.setAsyncProcessId(value == null ? StringUtils.EMPTY : key);
@@ -265,8 +303,9 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Parses parameters and sets up context if needed
    */
-  private JSONObject parseAndSetupParams(ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
-                                        int attemptNumber) throws JSONException {
+  private JSONObject parseAndSetupParams(
+      ReceiverRecord<String, AsyncProcessExecution> receiverRecord, int attemptNumber)
+      throws JSONException {
     var strParams = receiverRecord.value() == null ? "{}" : receiverRecord.value().getParams();
     var params = new JSONObject(strParams);
 
@@ -274,10 +313,8 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
     setupContextFromParams(params);
 
     logger.debug("Received message: topic-partition={} offset={} key={} attempt={}",
-        receiverRecord.receiverOffset().topicPartition(),
-        receiverRecord.receiverOffset().offset(),
-        receiverRecord.key(),
-        attemptNumber);
+        receiverRecord.receiverOffset().topicPartition(), receiverRecord.receiverOffset().offset(),
+        receiverRecord.key(), attemptNumber);
 
     setupJobParams(params);
     return params;
@@ -287,27 +324,55 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
    * Sets up context from message parameters
    */
   private void setupContextFromParams(JSONObject params) throws JSONException {
+    ContextInfo contextInfo = new ContextInfo();
+    JSONObject context = new JSONObject();
     if (params.has("params")) {
-      ContextInfo contextInfo = new ContextInfo();
-      contextInfo.previousUserId = OBContext.getOBContext().getUser().getId();
-      contextInfo.previousRoleId = OBContext.getOBContext().getRole().getId();
-      contextInfo.previousClientId = OBContext.getOBContext().getCurrentClient().getId();
-      contextInfo.previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
-      contextInfo.contextChanged = true;
-
-      JSONObject paramsObj = new JSONObject(params.getString("params"));
-      JSONObject context = paramsObj.optJSONObject("context");
-      if (context == null) {
-        context = new JSONObject();
+      if (OBContext.getOBContext().getUser() == null) {
+        String strParams = params.getString("params");
+        JSONObject jsonParams = new JSONObject(strParams);
+        if (jsonParams.has("context")) {
+          context = jsonParams.getJSONObject("context");
+          contextInfo.previousUserId = context.optString("user");
+          contextInfo.previousRoleId = context.optString("role");
+          contextInfo.previousClientId = context.optString("client");
+          contextInfo.previousOrgId = context.optString("organization");
+        }
+      } else {
+        contextInfo.previousUserId = OBContext.getOBContext().getUser().getId();
+        contextInfo.previousRoleId = OBContext.getOBContext().getRole().getId();
+        contextInfo.previousClientId = OBContext.getOBContext().getCurrentClient().getId();
+        contextInfo.previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
+        contextInfo.contextChanged = true;
       }
-
-      OBContext.setOBContext(
-          context.optString("user", contextInfo.previousUserId),
-          context.optString("role", contextInfo.previousRoleId),
-          context.optString("client", contextInfo.previousClientId),
-          context.optString("organization", contextInfo.previousOrgId)
-      );
+      JSONObject paramsObj = new JSONObject(params.getString("params"));
+      if (paramsObj.has("context")) {
+        context = paramsObj.optJSONObject("context");
+      }
     }
+    if (params.has("after")) {
+      JSONObject after = new JSONObject(params.getString("after"));
+      if (after != null) {
+        context.put("user", after.optString("updatedby"));
+        context.put("client", after.optString("ad_client_id"));
+        context.put("organization", after.optString("ad_org_id"));
+      }
+    }
+    String user = context.optString("user", contextInfo.previousUserId);
+    String role = context.optString("role", contextInfo.previousRoleId);
+    if (StringUtils.isEmpty(role) || StringUtils.equals(role, "null")) {
+      role = null;
+    }
+    String client = context.optString("client", contextInfo.previousClientId);
+    String organization = context.optString("organization", contextInfo.previousOrgId);
+
+    if (StringUtils.isEmpty(user) || StringUtils.isEmpty(client)
+        || StringUtils.isEmpty(organization) || StringUtils.equals(user, "null") || StringUtils.equals(role, "null") || StringUtils.equals(client, "null") || StringUtils.equals(organization, "null")) {
+      throw new OBException(
+          "Invalid context in message parameters. user, role, client and organization are required.");
+    }
+    OBContext.setOBContext(
+        user, role, client, organization
+    );
   }
 
   /**
@@ -335,7 +400,8 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Enriches parameters with action result information
    */
-  private JSONObject enrichParamsWithActionResult(JSONObject params, ActionResult result) throws JSONException {
+  private JSONObject enrichParamsWithActionResult(JSONObject params, ActionResult result)
+      throws JSONException {
     params = params == null ? new JSONObject() : params;
 
     addProcessIdToParams(params);
@@ -348,9 +414,17 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
    * Adds process ID to parameters
    */
   private void addProcessIdToParams(JSONObject params) throws JSONException {
+    boolean contextChanged = false;
     try {
+      if (OBContext.getOBContext() == null || OBContext.getOBContext().getUser() == null) {
+        OBContext.setOBContext("100", "0", "0", "0");
+      } else {
+        contextChanged = true;
+        OBContext.setAdminMode(true);
+      }
       String actionClassName = config.getActionFactory().get().getClass().getName();
-      Process actionObj = (Process) OBDal.getInstance().createCriteria(org.openbravo.client.application.Process.class)
+      Process actionObj = (Process) OBDal.getInstance()
+          .createCriteria(org.openbravo.client.application.Process.class)
           .add(org.hibernate.criterion.Restrictions.eq("javaClassName", actionClassName))
           .setMaxResults(1)
           .uniqueResult();
@@ -358,6 +432,10 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
     } catch (JSONException e) {
       logger.error("Error obtaining action class name: {}", e.getMessage(), e);
       throw new OBException(e);
+    } finally {
+      if (contextChanged) {
+        OBContext.restorePreviousMode();
+      }
     }
   }
 
@@ -377,10 +455,11 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Sends responses and acknowledges the message
    */
-  private void sendResponsesAndAcknowledge(ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
-                                          AsyncProcessExecution responseRecord, ReceiverOffset offset,
-                                          ActionResult result) {
-    if (receiverRecord.topic() != null && !StringUtils.equals(receiverRecord.topic(), "async-process-execution")) {
+  private void sendResponsesAndAcknowledge(
+      ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
+      AsyncProcessExecution responseRecord, ReceiverOffset offset, ActionResult result) {
+    if (receiverRecord.topic() != null && !StringUtils.equals(receiverRecord.topic(),
+        "async-process-execution")) {
       createResponse("async-process-execution", config.getKafkaSender(), responseRecord);
     }
 
@@ -401,12 +480,8 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
     OBContext.restorePreviousMode();
     if (contextInfo.contextChanged) {
       // Restore old context
-      OBContext.setOBContext(
-          contextInfo.previousUserId,
-          contextInfo.previousRoleId,
-          contextInfo.previousClientId,
-          contextInfo.previousOrgId
-      );
+      OBContext.setOBContext(contextInfo.previousUserId, contextInfo.previousRoleId,
+          contextInfo.previousClientId, contextInfo.previousOrgId);
     }
   }
 
@@ -419,28 +494,31 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
    *   <li>If the message field is not a valid JSON, it is ignored.</li>
    * </ul>
    *
-   * @param result
-   *     The ActionResult to extract the topics from
+   * @param result The ActionResult to extract the topics from
    * @return A list of topics to send the response to
    */
   private List<String> extractTargetsFromResult(ActionResult result) {
     List<String> targets = new ArrayList<>();
     targets.add(config.getNextTopic());
 
-    try {
-      JSONObject j = new JSONObject(result.getMessage());
-      Object nxt = j.opt("next");
+    // if result message is a string representing a JSON object with a "next" property,
+    if (!StringUtils.isEmpty(result.getMessage()) && result.getMessage().trim().startsWith("{")
+        && result.getMessage().trim().endsWith("}")) {
+      try {
+        JSONObject j = new JSONObject(result.getMessage());
+        Object nxt = j.opt("next");
 
-      if (nxt instanceof String && !JSONObject.NULL.equals(nxt)) {
-        targets.add((String) nxt);
-      } else if (nxt instanceof JSONArray) {
-        JSONArray arr = (JSONArray) nxt;
-        for (int i = 0; i < arr.length(); i++) {
-          targets.add(arr.getString(i));
+        if (nxt instanceof String && !JSONObject.NULL.equals(nxt)) {
+          targets.add((String) nxt);
+        } else if (nxt instanceof JSONArray) {
+          JSONArray arr = (JSONArray) nxt;
+          for (int i = 0; i < arr.length(); i++) {
+            targets.add(arr.getString(i));
+          }
         }
+      } catch (JSONException e) {
+        logger.warn("Invalid JSON in ActionResult message: {}", result.getMessage(), e);
       }
-    } catch (JSONException e) {
-      logger.warn("Invalid JSON in ActionResult message: {}", result.getMessage(), e);
     }
 
     return targets;
@@ -449,23 +527,21 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Handles errors with retry support
    */
-  private void handleError(
-      ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
-      Exception e,
-      String log,
-      AsyncProcessExecution responseRecord,
-      int attemptNumber) {
+  private void handleError(ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
+      Exception e, String log, AsyncProcessExecution responseRecord, int attemptNumber) {
 
     // If retry policy exists and more retries are allowed
-    if (config.getRetryPolicy() != null && config.getScheduler() != null && config.getRetryPolicy().shouldRetry(attemptNumber + 1)) {
+    if (config.getRetryPolicy() != null && config.getScheduler() != null && config.getRetryPolicy()
+        .shouldRetry(attemptNumber + 1)) {
       int nextAttempt = attemptNumber + 1;
       long delay = config.getRetryPolicy().getRetryDelay(nextAttempt);
 
-      logger.debug("Scheduling retry {} for message {} after {} ms",
-          nextAttempt, receiverRecord.key(), delay);
+      logger.debug("Scheduling retry {} for message {} after {} ms", nextAttempt,
+          receiverRecord.key(), delay);
 
       // Do not acknowledge the offset to allow retry later
-      config.getScheduler().schedule(() -> processRecord(receiverRecord, nextAttempt), delay, TimeUnit.MILLISECONDS);
+      config.getScheduler()
+          .schedule(() -> processRecord(receiverRecord, nextAttempt), delay, TimeUnit.MILLISECONDS);
     } else {
       // No more retries, send to error topic
       log = log + "\n" + new Date() + ": " + e.getMessage();
@@ -501,12 +577,11 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
   /**
    * Creates and sends a response message to the specified topic.
    *
-   * @param topic The Kafka topic to send the response to
-   * @param kafkaSender The Kafka sender instance
+   * @param topic          The Kafka topic to send the response to
+   * @param kafkaSender    The Kafka sender instance
    * @param responseRecord The response record to send
    */
-  public void createResponse(String topic,
-      KafkaSender<String, AsyncProcessExecution> kafkaSender,
+  public void createResponse(String topic, KafkaSender<String, AsyncProcessExecution> kafkaSender,
       AsyncProcessExecution responseRecord) {
     responseRecord.setId(Uuid.randomUuid().toString());
     responseRecord.setTime(new Date());
@@ -514,17 +589,14 @@ public class ReceiverRecordConsumer implements Consumer<ReceiverRecord<String, A
     list.add(responseRecord);
 
     kafkaSender.send(Flux.fromStream(list.stream())
-            .map(fluxMsg ->
-                SenderRecord.create(
-                    new ProducerRecord<>(topic, fluxMsg.getAsyncProcessId(), fluxMsg), fluxMsg.getAsyncProcessId())))
+            .map(fluxMsg -> SenderRecord.create(
+                new ProducerRecord<>(topic, fluxMsg.getAsyncProcessId(), fluxMsg),
+                fluxMsg.getAsyncProcessId())))
         .doOnError(e -> logger.error("Send failed", e))
         .subscribe(r -> {
           RecordMetadata metadata = r.recordMetadata();
           logger.debug("Message {} sent successfully, topic-partition={}-{} offset={}",
-              r.correlationMetadata(),
-              metadata.topic(),
-              metadata.partition(),
-              metadata.offset());
+              r.correlationMetadata(), metadata.topic(), metadata.partition(), metadata.offset());
         });
   }
 }

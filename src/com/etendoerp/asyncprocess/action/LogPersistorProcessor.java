@@ -47,7 +47,15 @@ public class LogPersistorProcessor extends Action {
 
     // Extract and set OB context
     ContextInfo contextInfo = extractContextInfo(parameters);
-    OBContext.setOBContext(contextInfo.userId, contextInfo.roleId, contextInfo.clientId, contextInfo.orgId);
+    if (contextInfo != null) {
+      try {
+        OBContext.setOBContext(contextInfo.userId != null ? contextInfo.userId : "100", contextInfo.roleId, contextInfo.clientId,
+            contextInfo.orgId);
+      } catch (Exception e) {
+        log.error("Error setting OBContext: {}", e.getMessage(), e);
+        OBContext.setOBContext("100", "0", "0", "0");
+      }
+    }
 
     // Process log header and entry
     LogHeader logHeader = getOrCreateLogHeader(asyncProcessId);
@@ -102,7 +110,7 @@ public class LogPersistorProcessor extends Action {
       log.error(ERROR_PARSING_PARAMS_JSON, e.getMessage(), e);
     }
 
-    throw new OBException("Cannot set OBContext. Missing user, role, org or client");
+    return null;
   }
 
   /**
@@ -132,15 +140,23 @@ public class LogPersistorProcessor extends Action {
     if (paramsJson.has(PARAM_AFTER) && !paramsJson.isNull(PARAM_AFTER)) {
       JSONObject after = paramsJson.getJSONObject(PARAM_AFTER);
       String userId = after.getString("assigned_user");
+      if (userId.isEmpty() || userId.equals("null")) {
+        userId = null;
+      }
+      if (userId == null) {
+        userId = after.getString("updatedby");
+      }
       String roleId = after.getString("assigned_role");
-      String orgId = after.getString("ad_org_id");
-      String clientId = after.getString("ad_client_id");
-
       if (roleId.isEmpty() || roleId.equals("null")) {
         roleId = null;
       }
+      String orgId = after.getString("ad_org_id");
+      String clientId = after.getString("ad_client_id");
 
-      validateContextInfo(userId, orgId, clientId);
+      if (roleId != null && (roleId.isEmpty() || roleId.equals("null"))) {
+        roleId = null;
+      }
+
       return new ContextInfo(userId, roleId, clientId, orgId);
     }
     throw new OBException("Cannot extract context from Debezium parameters");
@@ -274,13 +290,15 @@ public class LogPersistorProcessor extends Action {
   private JSONObject parseNestedParamsIfExists(JSONObject paramsJson) {
     if (paramsJson.has(PARAM_PARAMS)) {
       try {
-        return new JSONObject(paramsJson.getString(PARAM_PARAMS));
+        JSONObject nestedParams = new JSONObject(paramsJson.getString(PARAM_PARAMS));
+        return parseNestedParamsIfExists(nestedParams);
       } catch (Exception e) {
         log.error(ERROR_PARSING_PARAMS_JSON, e.getMessage(), e);
       }
     }
     return paramsJson;
   }
+
 
   private String prettyDescription(String description) {
     String jsonPart = null;
@@ -312,6 +330,9 @@ public class LogPersistorProcessor extends Action {
         log.error("Error parsing log description JSON: {}", e.getMessage(), e);
         return description;
       }
+    }
+    if (StringUtils.isEmpty(pretty.toString())) {
+      return description;
     }
     return pretty.toString();
   }
