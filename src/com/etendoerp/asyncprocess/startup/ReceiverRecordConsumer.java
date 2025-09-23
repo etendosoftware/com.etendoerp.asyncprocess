@@ -19,6 +19,7 @@ import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.base.exception.OBException;
 import org.openbravo.client.application.Process;
+import org.openbravo.client.kernel.RequestContext;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 
@@ -34,6 +35,8 @@ import reactor.kafka.receiver.ReceiverOffset;
 import reactor.kafka.receiver.ReceiverRecord;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
+
+import javax.servlet.http.HttpServletRequest;
 
 /**
  * Enhanced class that encapsulates all necessary objects to receive a message,
@@ -394,7 +397,20 @@ public class ReceiverRecordConsumer
       // retry_attempt was already set in parseAndSetupParams
     }
 
+    if (RequestContext.get().getRequest() == null) {
+      RequestContext.get().setRequest(
+          createFakeHttpServletRequest()
+      );
+    }
     return AsyncAction.run(config.getActionFactory(), params);
+  }
+
+  /**
+   * Creates a minimal fake HttpServletRequest using the existing HttpServletRequestWrapper
+   * This wrapper is designed to work without an original request (delegate == null)
+   */
+  private HttpServletRequest createFakeHttpServletRequest() {
+    return new RequestContext.HttpServletRequestWrapper(null);
   }
 
   /**
@@ -600,3 +616,4 @@ public class ReceiverRecordConsumer
         });
   }
 }
+
