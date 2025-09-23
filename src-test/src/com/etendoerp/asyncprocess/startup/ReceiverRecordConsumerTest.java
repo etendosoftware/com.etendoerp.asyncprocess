@@ -86,9 +86,6 @@ public class ReceiverRecordConsumerTest {
   private Supplier<Action> mockActionFactory;
 
   @Mock
-  private Action mockAction;
-
-  @Mock
   private ActionResult mockActionResult;
 
   @Mock
@@ -152,14 +149,29 @@ public class ReceiverRecordConsumerTest {
     mockedUuid = mockStatic(Uuid.class);
 
     consumerWithRetry = new ReceiverRecordConsumer(
-        TEST_JOB_ID, mockActionFactory, TEST_NEXT_TOPIC, TEST_ERROR_TOPIC,
-        AsyncProcessState.DONE, mockKafkaSender, TEST_CLIENT_ID, TEST_ORG_ID,
-        mockRetryPolicy, mockScheduler
+        new ReceiverRecordConsumer.ConsumerConfig.Builder()
+        .jobId(TEST_JOB_ID)
+        .actionFactory(mockActionFactory)
+        .nextTopic(TEST_NEXT_TOPIC)
+        .errorTopic(TEST_ERROR_TOPIC)
+        .targetStatus(AsyncProcessState.DONE)
+        .kafkaSender(mockKafkaSender)
+        .clientId(TEST_CLIENT_ID)
+        .orgId(TEST_ORG_ID)
+        .build()
     );
 
     consumerWithoutRetry = new ReceiverRecordConsumer(
-        TEST_JOB_ID, mockActionFactory, TEST_NEXT_TOPIC, TEST_ERROR_TOPIC,
-        AsyncProcessState.DONE, mockKafkaSender, TEST_CLIENT_ID, TEST_ORG_ID
+        new ReceiverRecordConsumer.ConsumerConfig.Builder()
+        .jobId(TEST_JOB_ID)
+        .actionFactory(mockActionFactory)
+        .nextTopic(TEST_NEXT_TOPIC)
+        .errorTopic(TEST_ERROR_TOPIC)
+        .targetStatus(AsyncProcessState.DONE)
+        .kafkaSender(mockKafkaSender)
+        .clientId(TEST_CLIENT_ID)
+        .orgId(TEST_ORG_ID)
+        .build()
     );
 
     setupCommonMocks();
@@ -515,15 +527,30 @@ public class ReceiverRecordConsumerTest {
   @Test
   public void testConstructors() {
     ReceiverRecordConsumer basicConsumer = new ReceiverRecordConsumer(
-        TEST_JOB_ID, mockActionFactory, TEST_NEXT_TOPIC, TEST_ERROR_TOPIC,
-        AsyncProcessState.DONE, mockKafkaSender, TEST_CLIENT_ID, TEST_ORG_ID
+        new ReceiverRecordConsumer.ConsumerConfig.Builder()
+            .jobId(TEST_JOB_ID)
+            .actionFactory(mockActionFactory)
+            .nextTopic(TEST_NEXT_TOPIC)
+            .errorTopic(TEST_ERROR_TOPIC)
+            .targetStatus(AsyncProcessState.DONE)
+            .kafkaSender(mockKafkaSender)
+            .clientId(TEST_CLIENT_ID)
+            .orgId(TEST_ORG_ID)
+            .build()
     );
     assertNotNull(basicConsumer);
 
     ReceiverRecordConsumer extendedConsumer = new ReceiverRecordConsumer(
-        TEST_JOB_ID, mockActionFactory, TEST_NEXT_TOPIC, TEST_ERROR_TOPIC,
-        AsyncProcessState.DONE, mockKafkaSender, TEST_CLIENT_ID, TEST_ORG_ID,
-        mockRetryPolicy, mockScheduler
+        new ReceiverRecordConsumer.ConsumerConfig.Builder()
+            .jobId(TEST_JOB_ID)
+            .actionFactory(mockActionFactory)
+            .nextTopic(TEST_NEXT_TOPIC)
+            .errorTopic(TEST_ERROR_TOPIC)
+            .targetStatus(AsyncProcessState.DONE)
+            .kafkaSender(mockKafkaSender)
+            .clientId(TEST_CLIENT_ID)
+            .orgId(TEST_ORG_ID)
+            .build()
     );
     assertNotNull(extendedConsumer);
   }

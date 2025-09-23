@@ -207,7 +207,7 @@ public class LogPersistorProcessor extends Action {
 
     String obuiappProcessId = getObuiappProcessId(parameters);
     if (obuiappProcessId != null) {
-      logEntry.setObuiappProcess(OBDal.getInstance().get(Process.class, obuiappProcessId));
+      logEntry.setProcess(OBDal.getInstance().get(Process.class, obuiappProcessId));
     }
 
     logEntry.setLineno((logHeader.getETAPLogList().size() + 1) * 10L);
