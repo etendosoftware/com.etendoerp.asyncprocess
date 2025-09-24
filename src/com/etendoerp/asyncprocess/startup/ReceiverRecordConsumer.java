@@ -406,11 +406,10 @@ public class ReceiverRecordConsumer
   }
 
   /**
-   * Creates a minimal fake HttpServletRequest using the existing HttpServletRequestWrapper
-   * This wrapper is designed to work without an original request (delegate == null)
+   * Creates a minimal fake HttpServletRequest for async processing contexts without a real request
    */
   private HttpServletRequest createFakeHttpServletRequest() {
-    return new RequestContext.HttpServletRequestWrapper(null);
+    return new DummyHttpServletRequest();
   }
 
   /**
@@ -615,5 +614,6 @@ public class ReceiverRecordConsumer
               r.correlationMetadata(), metadata.topic(), metadata.partition(), metadata.offset());
         });
   }
+
 }
 
