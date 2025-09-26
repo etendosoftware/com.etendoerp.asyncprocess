@@ -8,8 +8,24 @@ import java.security.Principal;
 import java.util.Enumeration;
 
 /**
- * A dummy implementation of HttpServletRequest for async processing context.
- * This class provides minimal implementations of the methods in HttpServletRequest.
+ * Lightweight dummy implementation of {@link HttpServletRequest} intended for use in
+ * asynchronous/background contexts where a full servlet request object is not available.
+ *
+ * <p>This class provides safe, minimal default values for commonly used methods so
+ * that code which expects an HttpServletRequest can execute without requiring a live
+ * HTTP request (for example when constructing messages or simulating a request in
+ * asynchronous processing).</p>
+ *
+ * <p>Behavior and limitations:
+ * <ul>
+ *   <li>Most mutation and session-related operations are no-ops and return null or
+ *       empty collections.</li>
+ *   <li>Default values are intentionally simple and deterministic (e.g. getMethod()
+ *       returns "POST", getRequestURI() returns "/async-process").</li>
+ *   <li>This class is not a full-featured HttpServletRequest implementation and must
+ *       not be used for real HTTP request processing.</li>
+ * </ul>
+ * </p>
  */
 class DummyHttpServletRequest implements HttpServletRequest {
   @Override
@@ -47,6 +63,10 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return -1;
   }
 
+  /**
+   * Returns the simulated HTTP method for this dummy request.
+   * Default: "POST".
+   */
   @Override
   public String getMethod() {
     return "POST";
@@ -62,6 +82,10 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return null;
   }
 
+  /**
+   * Returns the servlet context path for the simulated request.
+   * Default: empty string to represent the application root context.
+   */
   @Override
   public String getContextPath() {
     return "";
@@ -92,16 +116,29 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return null;
   }
 
+  /**
+   * Returns a fixed request URI used by asynchronous processing components.
+   * Default: "/async-process".
+   */
   @Override
   public String getRequestURI() {
     return "/async-process";
   }
 
+  /**
+   * Returns a simple request URL representation. This is a convenience value and
+   * should not be treated as a full URL builder.
+   * Default: "http://localhost:8080/etendo".
+   */
   @Override
   public StringBuffer getRequestURL() {
     return new StringBuffer("http://localhost:8080/etendo");
   }
 
+  /**
+   * Returns the servlet path for the simulated request.
+   * Default: "/async-process".
+   */
   @Override
   public String getServletPath() {
     return "/async-process";
@@ -180,6 +217,19 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return java.util.Collections.emptyEnumeration();
   }
 
+  /**
+   * Returns the content type that should be assumed for the dummy request.
+   * Default: "application/json".
+   */
+  @Override
+  public String getContentType() {
+    return "application/json";
+  }
+
+  /**
+   * Returns the character encoding used by this dummy request.
+   * Default: "UTF-8".
+   */
   @Override
   public String getCharacterEncoding() {
     return "UTF-8";
@@ -197,11 +247,6 @@ class DummyHttpServletRequest implements HttpServletRequest {
   @Override
   public long getContentLengthLong() {
     return -1L;
-  }
-
-  @Override
-  public String getContentType() {
-    return "application/json";
   }
 
   @Override
@@ -239,11 +284,19 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return "http";
   }
 
+  /**
+   * Returns the host name used in the dummy request environment.
+   * Default: "localhost".
+   */
   @Override
   public String getServerName() {
     return "localhost";
   }
 
+  /**
+   * Returns the server port used in the dummy request environment.
+   * Default: 8080.
+   */
   @Override
   public int getServerPort() {
     return 8080;
@@ -254,6 +307,10 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return null;
   }
 
+  /**
+   * Returns the remote IP address associated with this dummy request.
+   * Default: "127.0.0.1".
+   */
   @Override
   public String getRemoteAddr() {
     return "127.0.0.1";

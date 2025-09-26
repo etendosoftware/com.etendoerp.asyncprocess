@@ -63,6 +63,11 @@ import org.openbravo.dal.service.OBDal;
 import org.openbravo.model.ad.access.User;
 import org.openbravo.model.ad.system.Client;
 import org.openbravo.model.common.enterprise.Organization;
+import com.etendoerp.asyncprocess.monitoring.AsyncProcessMonitor;
+import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
+import com.etendoerp.asyncprocess.recovery.ConsumerRecoveryManager;
+import com.etendoerp.asyncprocess.circuit.KafkaCircuitBreaker;
+import reactor.core.Disposable;
 
 import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
 import com.etendoerp.asyncprocess.model.AsyncProcessState;
@@ -166,6 +171,96 @@ class AsyncProcessStartupTest {
     if (mockedWeldUtils != null) mockedWeldUtils.close();
     if (mockedClassLoader != null) mockedClassLoader.close();
     if (mockedAdminClient != null) mockedAdminClient.close();
+  }
+
+  private void inject(String fieldName, Object value) throws Exception {
+    Field f = AsyncProcessStartup.class.getDeclaredField(fieldName);
+    f.setAccessible(true);
+    f.set(asyncProcessStartup, value);
+  }
+
+  private void injectKafkaClientManager(KafkaClientManager kcm) throws Exception {
+    Field f = AsyncProcessStartup.class.getDeclaredField("kafkaClientManager");
+    f.setAccessible(true);
+    f.set(asyncProcessStartup, kcm);
+  }
+
+  private void injectJobProcessor(JobProcessor jp) throws Exception {
+    Field f = AsyncProcessStartup.class.getDeclaredField("jobProcessor");
+    f.setAccessible(true);
+    f.set(asyncProcessStartup, jp);
+  }
+
+  @Test
+  void testShutdownStopsAllComponentsAndDisposes() throws Exception {
+    AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
+    KafkaHealthChecker checker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
+    KafkaCircuitBreaker cb = mock(KafkaCircuitBreaker.class);
+
+    inject("processMonitor", monitor);
+    inject("healthChecker", checker);
+    inject("recoveryManager", recovery);
+    inject("circuitBreaker", cb);
+
+    // poblar activeSubscriptions con dos Disposables
+    Field subsF = AsyncProcessStartup.class.getDeclaredField("activeSubscriptions");
+    subsF.setAccessible(true);
+    @SuppressWarnings("unchecked")
+    Map<String, Disposable> subs =
+        (Map<String, Disposable>) subsF.get(asyncProcessStartup);
+    Disposable d1 = mock(Disposable.class);
+    Disposable d2 = mock(Disposable.class);
+    subs.put("s1", d1);
+    subs.put("s2", d2);
+
+    asyncProcessStartup.shutdown();
+
+    verify(monitor).stop();
+    verify(checker).stop();
+    verify(recovery).shutdown();
+    verify(cb).shutdown();
+    verify(d1).dispose();
+    verify(d2).dispose();
+    // y el mapa debería quedar vacío
+    assertTrue(((Map<?, ?>) subsF.get(asyncProcessStartup)).isEmpty());
+  }
+
+  @Test
+  void testForceHealthCheckEnablesRecoveryWhenHealthy() throws Exception {
+    KafkaHealthChecker checker = mock(KafkaHealthChecker.class);
+    when(checker.isKafkaHealthy()).thenReturn(true);
+    ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
+
+    inject("healthChecker", checker);
+    inject("recoveryManager", recovery);
+
+    asyncProcessStartup.forceHealthCheck();
+
+    // La implementación lo llama dos veces:
+    verify(checker, times(2)).isKafkaHealthy();
+    verify(recovery, times(1)).setRecoveryEnabled(true);
+  }
+
+  @Test
+  void testExecuteKafkaSetupDelegatesToManager() throws Exception {
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("true");
+
+    KafkaClientManager kcm = mock(KafkaClientManager.class);
+    when(kcm.createAdminClient()).thenReturn(mockAdminClient);
+    injectKafkaClientManager(kcm);
+
+    JobProcessor jp = mock(JobProcessor.class);
+    injectJobProcessor(jp);
+
+    Method m = AsyncProcessStartup.class.getDeclaredMethod("executeKafkaSetup");
+    m.setAccessible(true);
+    m.invoke(asyncProcessStartup);
+
+    verify(kcm, times(1)).createAdminClient();
+    verify(kcm, times(1)).createKafkaConnectTopics(mockAdminClient);
+    verify(jp,  times(1)).processAllJobs();
   }
 
   /**
@@ -300,117 +395,6 @@ class AsyncProcessStartupTest {
     String result = (String) method.invoke(asyncProcessStartup, mockJobLine);
 
     assertEquals("etendo-ap-group-test-job", result);
-  }
-
-  /**
-   * Tests the private getNumPartitions method when no partition property is set.
-   * Expects the default value to be returned.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testGetNumPartitionsDefault() throws Exception {
-    when(mockProperties.containsKey(KAFKA_PARTITIONS_KEY)).thenReturn(false);
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_NUM_PARTITIONS_METHOD);
-    method.setAccessible(true);
-    int result = (int) method.invoke(null);
-
-    assertEquals(5, result);
-  }
-
-  /**
-   * Tests the private getNumPartitions method when a valid partition property is set.
-   * Expects the configured value to be returned.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testGetNumPartitionsConfigured() throws Exception {
-    when(mockProperties.containsKey(KAFKA_PARTITIONS_KEY)).thenReturn(true);
-    when(mockProperties.getProperty(KAFKA_PARTITIONS_KEY)).thenReturn("10");
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_NUM_PARTITIONS_METHOD);
-    method.setAccessible(true);
-    int result = (int) method.invoke(null);
-
-    assertEquals(10, result);
-  }
-
-  /**
-   * Tests the private getNumPartitions method when an invalid partition property is set.
-   * Expects the default value to be returned if parsing fails.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testGetNumPartitionsInvalidNumber() throws Exception {
-    when(mockProperties.containsKey(KAFKA_PARTITIONS_KEY)).thenReturn(true);
-    when(mockProperties.getProperty(KAFKA_PARTITIONS_KEY)).thenReturn("invalid");
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod(GET_NUM_PARTITIONS_METHOD);
-    method.setAccessible(true);
-    int result = (int) method.invoke(null);
-
-    assertEquals(5, result);
-  }
-
-  /**
-   * Tests the private existsOrCreateTopic method for a new topic using reflection.
-   * Verifies that the topic is created if it does not exist.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testExistsOrCreateTopicNew() throws Exception {
-    String topicName = "new-topic";
-    int partitions = 3;
-
-    KafkaFuture<Set<String>> topicsFuture = mock(KafkaFuture.class);
-    when(mockListTopicsResult.names()).thenReturn(topicsFuture);
-    when(topicsFuture.get()).thenReturn(Collections.emptySet());
-    when(mockAdminClient.listTopics()).thenReturn(mockListTopicsResult);
-    when(mockAdminClient.createTopics(anyList())).thenReturn(mockCreateTopicsResult);
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("existsOrCreateTopic", AdminClient.class, String.class, int.class);
-    method.setAccessible(true);
-    method.invoke(asyncProcessStartup, mockAdminClient, topicName, partitions);
-
-    verify(mockAdminClient).listTopics();
-
-  }
-
-  /**
-   * Tests the private existsOrCreateTopic method for an existing topic using reflection.
-   * Verifies that the topic is not created if it already exists.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testExistsOrCreateTopicExists() throws Exception {
-    String topicName = "existing-topic";
-    int partitions = 3;
-
-    KafkaFuture<Set<String>> topicsFuture = mock(KafkaFuture.class);
-    when(mockListTopicsResult.names()).thenReturn(topicsFuture);
-    when(topicsFuture.get()).thenReturn(Collections.singleton(topicName));
-    when(mockAdminClient.listTopics()).thenReturn(mockListTopicsResult);
-
-    KafkaFuture<Map<String, TopicDescription>> descriptionFuture = mock(KafkaFuture.class);
-    TopicDescription topicDescription = mock(TopicDescription.class);
-    TopicPartitionInfo partitionInfo = mock(TopicPartitionInfo.class);
-    when(mockDescribeTopicsResult.all()).thenReturn(descriptionFuture);
-    when(descriptionFuture.get()).thenReturn(Collections.singletonMap(topicName, topicDescription));
-    when(topicDescription.partitions()).thenReturn(Arrays.asList(partitionInfo, partitionInfo, partitionInfo));
-    when(mockAdminClient.describeTopics(anyList())).thenReturn(mockDescribeTopicsResult);
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("existsOrCreateTopic", AdminClient.class, String.class, int.class);
-    method.setAccessible(true);
-    method.invoke(asyncProcessStartup, mockAdminClient, topicName, partitions);
-
-    verify(mockAdminClient).listTopics();
-    verify(mockAdminClient).describeTopics(Collections.singletonList(topicName));
-    verify(mockAdminClient, never()).createTopics(anyList());
   }
 
   /**
@@ -589,41 +573,6 @@ class AsyncProcessStartupTest {
     assertEquals(AsyncProcessState.ERROR, method.invoke(asyncProcessStartup, "ERROR"));
     assertEquals(AsyncProcessState.STARTED, method.invoke(asyncProcessStartup, "UNKNOWN"));
     assertEquals(AsyncProcessState.STARTED, method.invoke(asyncProcessStartup, (String) null));
-  }
-
-  /**
-   * Tests the private calculateErrorTopic method using reflection.
-   * Verifies that the error topic is calculated correctly from the job.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testCalculateErrorTopic() throws Exception {
-    when(mockJob.getEtapErrortopic()).thenReturn("custom-error-topic");
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("calculateErrorTopic", Job.class);
-    method.setAccessible(true);
-    String result = (String) method.invoke(asyncProcessStartup, mockJob);
-
-    assertEquals("custom-error-topic", result);
-  }
-
-  /**
-   * Tests the private calculateErrorTopic method when no error topic is set on the job.
-   * Expects a default error topic to be generated.
-   *
-   * @throws Exception if there is an error accessing or invoking the method
-   */
-  @Test
-  void testCalculateErrorTopicDefault() throws Exception {
-    when(mockJob.getEtapErrortopic()).thenReturn("");
-    when(mockJob.getName()).thenReturn("TestJob");
-
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("calculateErrorTopic", Job.class);
-    method.setAccessible(true);
-    String result = (String) method.invoke(asyncProcessStartup, mockJob);
-
-    assertTrue(result.contains("error"));
   }
 
   /**

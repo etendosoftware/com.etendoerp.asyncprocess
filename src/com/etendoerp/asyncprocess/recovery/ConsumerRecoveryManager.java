@@ -32,7 +32,33 @@ import reactor.kafka.sender.KafkaSender;
 
 /**
  * Auto-recovery manager for Kafka consumers.
- * Monitors consumer health and automatically recreates failed consumers.
+ *
+ * <p>This component monitors the health of consumer groups (via a {@link KafkaHealthChecker})
+ * and automatically attempts to recreate failed consumers when problems are detected. It
+ * maintains a registry of consumer definitions (represented by {@link ConsumerInfo}) and
+ * schedules recovery attempts with exponential backoff. The actual recreation logic is
+ * provided by an external {@link ConsumerRecreationFunction} which should create and return
+ * a {@link Flux} that emits {@link ReceiverRecord} instances for the recreated consumer.</p>
+ *
+ * <p>Main responsibilities:
+ * <ul>
+ *   <li>Register/unregister consumers that should be monitored for failure/recovery.</li>
+ *   <li>Listen to Kafka health and per-group health events and schedule recovery attempts.</li>
+ *   <li>Manage recovery attempts with configurable maximum attempts, base delay and backoff.</li>
+ *   <li>Dispose and recreate reactive subscriptions to recovered consumers and re-register
+ *       error handlers that re-schedule recovery when recovered consumers fail again.</li>
+ * </ul>
+ * </p>
+ *
+ * <p>Usage:
+ * <ol>
+ *   <li>Instantiate with a {@link KafkaHealthChecker}.</li>
+ *   <li>Call {@link #setConsumerRecreationFunction(ConsumerRecreationFunction)} to provide the
+ *       consumer creation logic.</li>
+ *   <li>Register consumers via {@link #registerConsumer(ConsumerInfo)}.</li>
+ *   <li>Enable or disable auto-recovery with {@link #setRecoveryEnabled(boolean)} as needed.</li>
+ * </ol>
+ * </p>
  */
 public class ConsumerRecoveryManager {
   private static final Logger log = LogManager.getLogger();
@@ -53,11 +79,30 @@ public class ConsumerRecoveryManager {
   // Consumer recreation function
   private ConsumerRecreationFunction consumerRecreationFunction;
   
+  /**
+   * Functional contract that must be implemented to recreate a consumer for a given
+   * {@link ConsumerInfo}. Implementations should return a reactive {@link Flux} that
+   * emits {@link ReceiverRecord} instances for the recreated consumer. The manager
+   * subscribes to the flux and handles errors/completion by scheduling retries when needed.
+   */
   @FunctionalInterface
   public interface ConsumerRecreationFunction {
+    /**
+     * Recreate a consumer according to the provided info.
+     *
+     * @param consumerInfo consumer metadata used to configure the recreated consumer
+     * @return Flux producing ReceiverRecord items for the recreated consumer
+     */
     Flux<ReceiverRecord<String, AsyncProcessExecution>> recreateConsumer(ConsumerInfo consumerInfo);
   }
   
+  /**
+   * Information holder describing a consumer instance to monitor and recover.
+   *
+   * <p>Instances are created via the nested {@link ConsumerInfo.Builder}. The object
+   * contains both static configuration (topic, group, clientId, etc.) and runtime
+   * fields such as the current subscription and active flag.</p>
+   */
   public static class ConsumerInfo {
     private final String consumerId;
     private final String groupId;
@@ -98,6 +143,10 @@ public class ConsumerRecoveryManager {
       this.kafkaHost = builder.kafkaHost;
     }
 
+    /**
+     * Builder for {@link ConsumerInfo}. Use the fluent methods to populate required
+     * and optional fields, then call {@link #build()}.
+     */
     public static class Builder {
       private String consumerId;
       private String groupId;
@@ -196,6 +245,11 @@ public class ConsumerRecoveryManager {
         return this;
       }
 
+      /**
+       * Validate and build the ConsumerInfo instance.
+       *
+       * @throws IllegalArgumentException when required fields are missing
+       */
       public ConsumerInfo build() {
         // Validate required fields
         if (consumerId == null || consumerId.trim().isEmpty()) {
@@ -246,11 +300,24 @@ public class ConsumerRecoveryManager {
     public void setActive(boolean active) { this.isActive = active; }
   }
   
+  /**
+   * Create a ConsumerRecoveryManager using default recovery parameters.
+   *
+   * @param healthChecker health checker used to receive consumer and kafka health events
+   */
   public ConsumerRecoveryManager(KafkaHealthChecker healthChecker) {
     this(healthChecker, DEFAULT_MAX_RECOVERY_ATTEMPTS, DEFAULT_RECOVERY_DELAY_MS, DEFAULT_RECOVERY_BACKOFF_MULTIPLIER);
   }
   
-  public ConsumerRecoveryManager(KafkaHealthChecker healthChecker, int maxRecoveryAttempts, 
+  /**
+   * Create a ConsumerRecoveryManager with custom recovery configuration.
+   *
+   * @param healthChecker health checker used to receive events
+   * @param maxRecoveryAttempts maximum number of recovery attempts per consumer group
+   * @param baseRecoveryDelayMs base delay in milliseconds for retry scheduling
+   * @param recoveryBackoffMultiplier exponential backoff multiplier applied to the delay
+   */
+  public ConsumerRecoveryManager(KafkaHealthChecker healthChecker, int maxRecoveryAttempts,
                                 long baseRecoveryDelayMs, long recoveryBackoffMultiplier) {
     this.healthChecker = healthChecker;
     this.maxRecoveryAttempts = maxRecoveryAttempts;
@@ -263,6 +330,10 @@ public class ConsumerRecoveryManager {
   
   /**
    * Sets up listeners for health check events.
+   *
+   * <p>This registers callbacks with the {@link KafkaHealthChecker} to be notified when
+   * consumer groups become unhealthy or healthy again and when Kafka connectivity changes.
+   * On consumer-unhealthy events the manager schedules recovery attempts (if enabled).</p>
    */
   private void setupHealthListeners() {
     healthChecker.setConsumerHealthListener(new KafkaHealthChecker.ConsumerHealthListener() {
@@ -295,6 +366,8 @@ public class ConsumerRecoveryManager {
   
   /**
    * Registers a consumer for monitoring and potential recovery.
+   *
+   * @param consumerInfo information describing the consumer to monitor
    */
   public void registerConsumer(ConsumerInfo consumerInfo) {
     activeConsumers.put(consumerInfo.getConsumerId(), consumerInfo);
@@ -304,7 +377,10 @@ public class ConsumerRecoveryManager {
   }
   
   /**
-   * Unregisters a consumer from monitoring.
+   * Unregisters a consumer from monitoring. If the consumer has an active subscription
+   * it is disposed.
+   *
+   * @param consumerId identifier of the consumer to unregister
    */
   public void unregisterConsumer(String consumerId) {
     ConsumerInfo consumerInfo = activeConsumers.remove(consumerId);
@@ -318,7 +394,10 @@ public class ConsumerRecoveryManager {
   }
   
   /**
-   * Sets the function to recreate consumers.
+   * Sets the function to recreate consumers. This function is invoked when a recovery
+   * attempt is performed and must return a {@link Flux} that represents the new consumer.
+   *
+   * @param function recreation function to use during recovery
    */
   public void setConsumerRecreationFunction(ConsumerRecreationFunction function) {
     this.consumerRecreationFunction = function;

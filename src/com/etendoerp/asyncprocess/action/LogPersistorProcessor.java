@@ -1,14 +1,14 @@
 package com.etendoerp.asyncprocess.action;
 
-import com.auth0.jwt.interfaces.DecodedJWT;
-import com.etendoerp.asyncprocess.data.Log;
-import com.etendoerp.asyncprocess.data.LogHeader;
-import com.etendoerp.asyncprocess.hooks.LogPersistorIdentifierHook;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.smf.jobs.Action;
-import com.smf.jobs.ActionResult;
-import com.smf.jobs.Result;
-import com.smf.securewebservices.utils.SecureWebServicesUtils;
+import java.io.UnsupportedEncodingException;
+import java.security.NoSuchAlgorithmException;
+import java.security.spec.InvalidKeySpecException;
+import java.util.Iterator;
+
+import javax.enterprise.inject.Any;
+import javax.enterprise.inject.Instance;
+import javax.inject.Inject;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.logging.log4j.LogManager;
@@ -20,13 +20,15 @@ import org.openbravo.client.application.Process;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 
-import javax.enterprise.inject.Any;
-import javax.enterprise.inject.Instance;
-import javax.inject.Inject;
-import java.io.UnsupportedEncodingException;
-import java.security.NoSuchAlgorithmException;
-import java.security.spec.InvalidKeySpecException;
-import java.util.Iterator;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.etendoerp.asyncprocess.data.Log;
+import com.etendoerp.asyncprocess.data.LogHeader;
+import com.etendoerp.asyncprocess.hooks.LogPersistorIdentifierHook;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.smf.jobs.Action;
+import com.smf.jobs.ActionResult;
+import com.smf.jobs.Result;
+import com.smf.securewebservices.utils.SecureWebServicesUtils;
 
 public class LogPersistorProcessor extends Action {
   private static final Logger log = LogManager.getLogger(LogPersistorProcessor.class);
@@ -49,7 +51,8 @@ public class LogPersistorProcessor extends Action {
     ContextInfo contextInfo = extractContextInfo(parameters);
     if (contextInfo != null) {
       try {
-        OBContext.setOBContext(contextInfo.userId != null ? contextInfo.userId : "100", contextInfo.roleId, contextInfo.clientId,
+        OBContext.setOBContext(contextInfo.userId != null ? contextInfo.userId : "100", contextInfo.roleId,
+            contextInfo.clientId,
             contextInfo.orgId);
       } catch (Exception e) {
         log.error("Error setting OBContext: {}", e.getMessage(), e);
@@ -200,7 +203,7 @@ public class LogPersistorProcessor extends Action {
    */
   private Log createLogEntry(JSONObject parameters, LogHeader logHeader) {
     Log logEntry = new Log();
-    logEntry.setEtapLogHeader(logHeader);
+    logEntry.setLogHeader(logHeader);
 
     String description = getLogDescription(parameters);
     logEntry.setMessage(prettyDescription(description));
@@ -210,7 +213,7 @@ public class LogPersistorProcessor extends Action {
       logEntry.setProcess(OBDal.getInstance().get(Process.class, obuiappProcessId));
     }
 
-    logEntry.setLineno((logHeader.getETAPLogList().size() + 1) * 10L);
+    logEntry.setLineNo((logHeader.getETAPLogList().size() + 1) * 10L);
     return logEntry;
   }
 
@@ -238,7 +241,8 @@ public class LogPersistorProcessor extends Action {
   /**
    * Extracts the obuiapp_process_id from the parameters JSON, handling nested params structure.
    *
-   * @param parameters the main parameters JSONObject
+   * @param parameters
+   *     the main parameters JSONObject
    * @return the extracted obuiapp_process_id or null if not found or parsing fails
    */
   private String extractObuiappProcessId(JSONObject parameters) {
@@ -268,7 +272,8 @@ public class LogPersistorProcessor extends Action {
   /**
    * Extracts obuiapp_process_id from nested params structure.
    *
-   * @param paramsJson the params JSONObject that may contain nested params
+   * @param paramsJson
+   *     the params JSONObject that may contain nested params
    * @return the extracted obuiapp_process_id or null if not found or parsing fails
    */
   private String extractFromNestedParams(JSONObject paramsJson) {
@@ -284,7 +289,8 @@ public class LogPersistorProcessor extends Action {
   /**
    * Parses nested params JSON object if it exists.
    *
-   * @param paramsJson the JSONObject that may contain nested params
+   * @param paramsJson
+   *     the JSONObject that may contain nested params
    * @return the nested JSONObject if parsing succeeds, or the original paramsJson if no nested params or parsing fails
    */
   private JSONObject parseNestedParamsIfExists(JSONObject paramsJson) {
