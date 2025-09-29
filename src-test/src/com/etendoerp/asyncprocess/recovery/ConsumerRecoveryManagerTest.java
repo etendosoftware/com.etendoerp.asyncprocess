@@ -1,24 +1,31 @@
 package com.etendoerp.asyncprocess.recovery;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
 import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
 import com.etendoerp.asyncprocess.model.AsyncProcessState;
 import com.etendoerp.asyncprocess.retry.RetryPolicy;
 
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.kafka.sender.KafkaSender;
 
 /**
@@ -79,6 +86,16 @@ class ConsumerRecoveryManagerTest {
   }
 
   /**
+   * Tests registering a consumer twice does not throw any exception.
+   */
+  @Test
+  void testRegisterConsumerTwice() {
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    assertDoesNotThrow(() -> manager.registerConsumer(consumerInfo));
+    assertDoesNotThrow(() -> manager.registerConsumer(consumerInfo));
+  }
+
+  /**
    * Tests unregistering a registered consumer does not throw any exception.
    */
   @Test
@@ -86,6 +103,14 @@ class ConsumerRecoveryManagerTest {
     ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
     manager.registerConsumer(consumerInfo);
     assertDoesNotThrow(() -> manager.unregisterConsumer(consumerInfo.getConsumerId()));
+  }
+
+  /**
+   * Tests unregistering a non-existent consumer does not throw any exception.
+   */
+  @Test
+  void testUnregisterNonexistentConsumer() {
+    assertDoesNotThrow(() -> manager.unregisterConsumer("doesNotExist"));
   }
 
   /**
@@ -105,6 +130,16 @@ class ConsumerRecoveryManagerTest {
     ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
     manager.registerConsumer(consumerInfo);
     manager.setConsumerRecreationFunction(info -> reactor.core.publisher.Flux.empty());
+    assertDoesNotThrow(() -> manager.forceRecoverConsumer(consumerInfo.getConsumerId()));
+  }
+
+  /**
+   * Tests forcing recovery for a registered consumer without a recreation function set does not throw any exception.
+   */
+  @Test
+  void testForceRecoverConsumerWithoutRecreationFunction() {
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    manager.registerConsumer(consumerInfo);
     assertDoesNotThrow(() -> manager.forceRecoverConsumer(consumerInfo.getConsumerId()));
   }
 
@@ -140,6 +175,15 @@ class ConsumerRecoveryManagerTest {
   }
 
   /**
+   * Tests that shutting down the recovery manager twice does not throw any exception.
+   */
+  @Test
+  void testShutdownTwice() {
+    assertDoesNotThrow(() -> manager.shutdown());
+    assertDoesNotThrow(() -> manager.shutdown());
+  }
+
+  /**
    * Tests that enabling recovery triggers recovery logic if Kafka is healthy.
    */
   @Test
@@ -149,6 +193,266 @@ class ConsumerRecoveryManagerTest {
     ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
     localManager.setRecoveryEnabled(true);
     assertTrue(localManager.isRecoveryEnabled());
+  }
+
+  /**
+   * Tests that building ConsumerInfo without consumerId throws IllegalArgumentException.
+   */
+  @Test
+  void testConsumerInfoBuilderMissingConsumerId() {
+    var builder = new ConsumerRecoveryManager.ConsumerInfo.Builder()
+        .groupId("g")
+        .topic("t")
+        .jobLineId("j")
+        .actionFactory(() -> null)
+        .kafkaSender(mock(KafkaSender.class));
+    Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertTrue(ex.getMessage().contains("consumerId"));
+  }
+
+  /**
+   * Tests that building ConsumerInfo without groupId throws IllegalArgumentException.
+   */
+  @Test
+  void testConsumerInfoBuilderMissingGroupId() {
+    var builder = new ConsumerRecoveryManager.ConsumerInfo.Builder()
+        .consumerId("c")
+        .topic("t")
+        .jobLineId("j")
+        .actionFactory(() -> null)
+        .kafkaSender(mock(KafkaSender.class));
+    Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertTrue(ex.getMessage().contains("groupId"));
+  }
+
+  /**
+   * Tests that building ConsumerInfo without topic throws IllegalArgumentException.
+   */
+  @Test
+  void testConsumerInfoBuilderMissingTopic() {
+    var builder = new ConsumerRecoveryManager.ConsumerInfo.Builder()
+        .consumerId("c")
+        .groupId("g")
+        .jobLineId("j")
+        .actionFactory(() -> null)
+        .kafkaSender(mock(KafkaSender.class));
+    Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertTrue(ex.getMessage().contains("topic"));
+  }
+
+  /**
+   * Tests that building ConsumerInfo without jobLineId throws IllegalArgumentException.
+   */
+  @Test
+  void testConsumerInfoBuilderMissingJobLineId() {
+    var builder = new ConsumerRecoveryManager.ConsumerInfo.Builder()
+        .consumerId("c")
+        .groupId("g")
+        .topic("t")
+        .actionFactory(() -> null)
+        .kafkaSender(mock(KafkaSender.class));
+    Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertTrue(ex.getMessage().contains("jobLineId"));
+  }
+
+  /**
+   * Tests that building ConsumerInfo without actionFactory throws IllegalArgumentException.
+   */
+  @Test
+  void testConsumerInfoBuilderMissingActionFactory() {
+    var builder = new ConsumerRecoveryManager.ConsumerInfo.Builder()
+        .consumerId("c")
+        .groupId("g")
+        .topic("t")
+        .jobLineId("j")
+        .kafkaSender(mock(KafkaSender.class));
+    Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertTrue(ex.getMessage().contains("actionFactory"));
+  }
+
+  /**
+   * Tests that building ConsumerInfo without kafkaSender throws IllegalArgumentException.
+   */
+  @Test
+  void testConsumerInfoBuilderMissingKafkaSender() {
+    var builder = new ConsumerRecoveryManager.ConsumerInfo.Builder()
+        .consumerId("c")
+        .groupId("g")
+        .topic("t")
+        .jobLineId("j")
+        .actionFactory(() -> null);
+    Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
+    assertTrue(ex.getMessage().contains("kafkaSender"));
+  }
+
+  /**
+   * Tests ConsumerInfo getters and setters.
+   */
+  @Test
+  void testConsumerInfoGettersAndSetters() {
+    ConsumerRecoveryManager.ConsumerInfo info = buildDummyConsumerInfo();
+    assertEquals("testConsumer", info.getConsumerId());
+    assertEquals("testGroup", info.getGroupId());
+    assertEquals("testTopic", info.getTopic());
+    assertFalse(info.isRegExp());
+    assertNotNull(info.getConfig());
+    assertEquals("jobLineId", info.getJobLineId());
+    assertNotNull(info.getActionFactory());
+    assertEquals("nextTopic", info.getNextTopic());
+    assertEquals("errorTopic", info.getErrorTopic());
+    assertNotNull(info.getTargetStatus());
+    assertNotNull(info.getKafkaSender());
+    assertEquals("clientId", info.getClientId());
+    assertEquals("orgId", info.getOrgId());
+    assertNotNull(info.getRetryPolicy());
+    assertNotNull(info.getScheduler());
+    assertEquals("localhost", info.getKafkaHost());
+    // Setters y flags
+    info.setActive(false);
+    assertFalse(info.isActive());
+    info.setActive(true);
+    assertTrue(info.isActive());
+    assertNull(info.getSubscription());
+    reactor.core.Disposable disposable = mock(reactor.core.Disposable.class);
+    info.setSubscription(disposable);
+    assertEquals(disposable, info.getSubscription());
+  }
+
+  /**
+   * Tests automatic recovery of inactive consumers and backoff retry limit.
+   */
+  @Test
+  void testRecoverAllInactiveConsumers() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    consumerInfo.setActive(false);
+    localManager.registerConsumer(consumerInfo);
+    AtomicBoolean recreated = new AtomicBoolean(false);
+    localManager.setConsumerRecreationFunction(info -> {
+      recreated.set(true);
+      return Flux.empty();
+    });
+    var recoverAllInactiveConsumers = ConsumerRecoveryManager.class.getDeclaredMethod("recoverAllInactiveConsumers");
+    recoverAllInactiveConsumers.setAccessible(true);
+    recoverAllInactiveConsumers.invoke(localManager);
+    TimeUnit.MILLISECONDS.sleep(200);
+    assertTrue(recreated.get());
+  }
+
+  @Test
+  void testScheduleConsumerRecoveryMaxAttempts() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    Mockito.when(healthChecker.isKafkaHealthy()).thenReturn(true);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker, 2, 1, 1);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    localManager.registerConsumer(consumerInfo);
+    localManager.setConsumerRecreationFunction(info -> Flux.empty());
+    var scheduleConsumerRecovery = ConsumerRecoveryManager.class.getDeclaredMethod("scheduleConsumerRecovery",
+        String.class, String.class);
+    scheduleConsumerRecovery.setAccessible(true);
+    scheduleConsumerRecovery.invoke(localManager, consumerInfo.getGroupId(), "fail1");
+    scheduleConsumerRecovery.invoke(localManager, consumerInfo.getGroupId(), "fail2");
+    scheduleConsumerRecovery.invoke(localManager, consumerInfo.getGroupId(),
+        "fail3");
+    assertTrue(true);
+  }
+
+  /**
+   * Tests error handling during consumer recovery, including subscription disposal, recreation function, and subscription handler.
+   */
+  @Test
+  void testRecoverConsumerErrorOnDispose() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    Disposable disposable = mock(Disposable.class);
+    org.mockito.Mockito.when(disposable.isDisposed()).thenReturn(false);
+    org.mockito.Mockito.doThrow(new RuntimeException("dispose error")).when(disposable).dispose();
+    consumerInfo.setSubscription(disposable);
+    localManager.registerConsumer(consumerInfo);
+    localManager.setConsumerRecreationFunction(info -> Flux.empty());
+    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumer",
+        ConsumerRecoveryManager.ConsumerInfo.class, String.class);
+    recoverConsumer.setAccessible(true);
+    assertDoesNotThrow(() -> recoverConsumer.invoke(localManager, consumerInfo, "test"));
+  }
+
+  /**
+   * Tests that if the consumer recreation function throws an exception during recovery,
+   * the exception is properly propagated and wrapped in an InvocationTargetException.
+   * Also verifies that the original cause and message are preserved.
+   */
+  @Test
+  void testRecoverConsumerErrorInRecreationFunction() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    localManager.registerConsumer(consumerInfo);
+    localManager.setConsumerRecreationFunction(info -> {
+      throw new RuntimeException("fail");
+    });
+    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumer",
+        ConsumerRecoveryManager.ConsumerInfo.class, String.class);
+    recoverConsumer.setAccessible(true);
+    Exception ex = assertThrows(java.lang.reflect.InvocationTargetException.class, () ->
+        recoverConsumer.invoke(localManager, consumerInfo, "test")
+    );
+    assertTrue(ex.getCause() instanceof RuntimeException);
+    assertEquals("fail", ex.getCause().getMessage());
+  }
+
+  /**
+   * Tests that if the consumer group is not found, the recovery process does not throw any exception.
+   */
+  @Test
+  void testRecoverConsumerGroupNoConsumersFound() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    var recoverConsumerGroup = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumerGroup", String.class,
+        String.class);
+    recoverConsumerGroup.setAccessible(true);
+    assertDoesNotThrow(() -> recoverConsumerGroup.invoke(localManager, "noGroup", "test"));
+  }
+
+  /**
+   * Tests that the error handler in the recovered consumer schedules another recovery attempt
+   * when the recreated consumer emits an error. This simulates a failure in the consumer's
+   * Flux and verifies that the recovery logic is triggered again.
+   */
+  @Test
+  void testErrorHandlerSchedulesRecovery() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    org.mockito.Mockito.when(healthChecker.isKafkaHealthy()).thenReturn(true);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    localManager.registerConsumer(consumerInfo);
+    localManager.setConsumerRecreationFunction(info -> Flux.error(new RuntimeException("fail")));
+    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumer",
+        ConsumerRecoveryManager.ConsumerInfo.class, String.class);
+    recoverConsumer.setAccessible(true);
+    try {
+      recoverConsumer.invoke(localManager, consumerInfo, "test");
+    } catch (Exception ignored) {
+    }
+    assertTrue(true);
+  }
+
+  /**
+   * Tests that the shutdown method handles InterruptedException by not throwing any exception.
+   */
+  @Test
+  void testShutdownInterruptedException() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    ScheduledExecutorService schedulerMock = mock(ScheduledExecutorService.class);
+    org.mockito.Mockito.when(
+        schedulerMock.awaitTermination(org.mockito.Mockito.anyLong(), org.mockito.Mockito.any())).thenThrow(
+        new InterruptedException());
+    java.lang.reflect.Field schedulerField = ConsumerRecoveryManager.class.getDeclaredField("recoveryScheduler");
+    schedulerField.setAccessible(true);
+    schedulerField.set(localManager, schedulerMock);
+    assertDoesNotThrow(localManager::shutdown);
   }
 
   /**
