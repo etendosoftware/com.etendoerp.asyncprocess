@@ -264,7 +264,7 @@ public class KafkaHealthChecker {
   /**
    * Checks the health of a specific consumer group.
    */
-  private void checkConsumerGroupHealth(AdminClient adminClient, String groupId) {
+  void checkConsumerGroupHealth(AdminClient adminClient, String groupId) {
     try {
       ConsumerGroupDescription description = adminClient.describeConsumerGroups(Collections.singleton(groupId))
           .describedGroups()

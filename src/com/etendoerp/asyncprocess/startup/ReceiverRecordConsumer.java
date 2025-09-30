@@ -244,14 +244,8 @@ public class ReceiverRecordConsumer
 
       JSONObject params = parseAndSetupParams(receiverRecord, attemptNumber);
       log = updateLogWithRetryInfo(log, attemptNumber);
-      ActionResult result;
-      try {
-        result = executeAction(params);
-      } catch (Exception e) {
-        result = new ActionResult();
-        result.setType(ActionResult.Type.ERROR);
-        result.setMessage("Unexpected error: " + e.getMessage());
-      }
+      // Let exceptions from executeAction propagate so retry logic (handleError) can act on them
+      ActionResult result = executeAction(params);
       params = enrichParamsWithActionResult(params, result);
       log = updateLogWithResult(log, result);
 
@@ -327,6 +321,16 @@ public class ReceiverRecordConsumer
    * Sets up context from message parameters
    */
   private void setupContextFromParams(JSONObject params) throws JSONException {
+    // Early guard: if no contextual info provided, keep existing OBContext or set a safe fallback.
+    if (!params.has("params") && !params.has("after")) {
+      if (OBContext.getOBContext() != null && OBContext.getOBContext().getUser() != null) {
+        // Existing context is valid; nothing to do.
+        return;
+      }
+      // Fallback to default system user/role plus configured client/org.
+      OBContext.setOBContext("100", "0", config.getClientId(), config.getOrgId());
+      return;
+    }
     ContextInfo contextInfo = new ContextInfo();
     JSONObject context = new JSONObject();
     if (params.has("params")) {

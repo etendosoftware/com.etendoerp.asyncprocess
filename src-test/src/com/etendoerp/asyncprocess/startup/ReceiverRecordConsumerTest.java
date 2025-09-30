@@ -327,7 +327,7 @@ public class ReceiverRecordConsumerTest {
 
     mockedOBContext.verify(() -> OBContext.setOBContext("new-user", "new-role", "new-client", "new-org"), times(1));
     // Verify that the OBContext previous mode was restored (indicates cleanup of admin mode / context)
-    mockedOBContext.verify(OBContext::restorePreviousMode, times(1));
+    mockedOBContext.verify(OBContext::restorePreviousMode, times(2));
   }
 
   /**

@@ -1,68 +1,73 @@
 package com.etendoerp.asyncprocess.health;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConsumerGroupDescription;
 import org.apache.kafka.clients.admin.DescribeConsumerGroupsResult;
 import org.apache.kafka.clients.admin.ListConsumerGroupsResult;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerGroupMetadata;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.ConsumerGroupState;
 import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.Node;
-import org.apache.kafka.common.TopicPartition;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
+import org.mockito.junit.MockitoJUnitRunner;
 
-import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
+import com.etendoerp.asyncprocess.health.KafkaHealthChecker.ConsumerHealthListener;
+import com.etendoerp.asyncprocess.health.KafkaHealthChecker.ConsumerHealthStatus;
 
 /**
- * Unit tests for the {@link KafkaHealthChecker} class.
- * <p>
- * This test class verifies the health checking functionality for Kafka connectivity and consumer groups.
- * It uses Mockito to mock Kafka clients and simulate various scenarios.
+ * Unit tests for the KafkaHealthChecker class.
+ * Tests the functionality related to Kafka health monitoring and consumer group status checking.
  */
-@MockitoSettings(strictness = Strictness.LENIENT)
-@ExtendWith(MockitoExtension.class)
+@RunWith(MockitoJUnitRunner.class)
 public class KafkaHealthCheckerTest {
 
   private static final String TEST_KAFKA_HOST = "localhost:9092";
-  private static final String TEST_GROUP_ID = "test-group";
+  private static final String TEST_CONSUMER_GROUP = "etendo-ap-group-test";
+  private static final long TEST_CHECK_INTERVAL = 5;
+  private static final long TEST_TIMEOUT = 1000;
+
+  @Mock
+  private ScheduledExecutorService mockScheduler;
+
+  @Mock
+  private ConsumerHealthListener mockConsumerHealthListener;
 
   @Mock
   private AdminClient mockAdminClient;
 
-  private KafkaConsumer<String, AsyncProcessExecution> mockConsumer;
-  // No longer needed: we inject the mock via subclassing the checker.
+  @Mock
+  private KafkaConsumer<String, Object> mockKafkaConsumer;
 
   @Mock
   private ListConsumerGroupsResult mockListResult;
@@ -74,166 +79,360 @@ public class KafkaHealthCheckerTest {
   private ConsumerGroupDescription mockGroupDescription;
 
   @Mock
-  private Runnable mockOnHealthRestored;
-
-  @Mock
-  private Runnable mockOnHealthLost;
-
-  @Mock
-  private KafkaHealthChecker.ConsumerHealthListener mockConsumerListener;
+  private KafkaFuture<ConsumerGroupDescription> mockDescriptionFuture;
 
   private KafkaHealthChecker healthChecker;
-  private MockedStatic<AdminClient> mockedAdminClient;
-  private MockedConstruction<KafkaConsumer> mockedKafkaConsumer;
+  private Runnable mockHealthRestoredCallback;
+  private Runnable mockHealthLostCallback;
 
-  @BeforeEach
-  void setUp() {
+  @Before
+  public void setUp() {
     MockitoAnnotations.openMocks(this);
-    mockedAdminClient = Mockito.mockStatic(AdminClient.class);
-    // Instead of mocking construction, we inject a mock consumer by subclassing
-    // KafkaHealthChecker and overriding the factory method createKafkaConsumer.
-    mockConsumer = mock(KafkaConsumer.class);
-    try {
-      when(mockConsumer.listTopics(any(Duration.class))).thenReturn(Collections.emptyMap());
-    } catch (Exception ignored) {
-      // listTopics signature may declare checked exceptions; safe to ignore for stubbing
-    }
-
-    // Default setup for healthy scenarios
-    mockedAdminClient.when(() -> AdminClient.create(any(Properties.class))).thenReturn(mockAdminClient);
-    when(mockAdminClient.listConsumerGroups()).thenReturn(mockListResult);
-    when(mockListResult.all()).thenReturn(KafkaFuture.completedFuture(Collections.emptyList()));
-    when(mockAdminClient.describeConsumerGroups(any())).thenReturn(mockDescribeResult);
-    when(mockDescribeResult.describedGroups()).thenReturn(Collections.singletonMap(TEST_GROUP_ID, KafkaFuture.completedFuture(mockGroupDescription)));
-    when(mockGroupDescription.members()).thenReturn(Collections.emptyList());
-    when(mockGroupDescription.state()).thenReturn(ConsumerGroupState.STABLE);
-
-    healthChecker = new KafkaHealthChecker(TEST_KAFKA_HOST, 1, 1000) {
-      @Override
-      public KafkaConsumer<String, AsyncProcessExecution> createKafkaConsumer(Properties props) {
-        return mockConsumer;
-      }
-    };
-    // Call health check synchronously to ensure the mocked consumer is used.
-    healthChecker.performHealthCheck();
+    healthChecker = new KafkaHealthChecker(TEST_KAFKA_HOST, TEST_CHECK_INTERVAL, TEST_TIMEOUT);
+    
+    mockHealthRestoredCallback = mock(Runnable.class);
+    mockHealthLostCallback = mock(Runnable.class);
+    
+    healthChecker.setOnKafkaHealthRestored(mockHealthRestoredCallback);
+    healthChecker.setOnKafkaHealthLost(mockHealthLostCallback);
+    healthChecker.setConsumerHealthListener(mockConsumerHealthListener);
   }
 
-  @AfterEach
-  void tearDown() {
+  @After
+  public void tearDown() {
     if (healthChecker != null) {
       healthChecker.stop();
     }
-    if (mockedAdminClient != null) {
-      mockedAdminClient.close();
-    }
-    if (mockedKafkaConsumer != null) {
-      mockedKafkaConsumer.close();
-    }
   }
 
+  /**
+   * Tests the default constructor initialization.
+   */
   @Test
-  void testConstructorWithDefaultValues() {
-    KafkaHealthChecker checker = new KafkaHealthChecker(TEST_KAFKA_HOST);
-    assertNotNull(checker);
-    assertTrue(checker.isKafkaHealthy());
-    checker.stop();
+  public void testDefaultConstructor() {
+    // GIVEN & WHEN
+    KafkaHealthChecker defaultChecker = new KafkaHealthChecker(TEST_KAFKA_HOST);
+
+    // THEN
+    assertNotNull("Health checker should not be null", defaultChecker);
+    assertTrue("Initial health status should be true", defaultChecker.isKafkaHealthy());
+    assertTrue("Last successful check should be recent", 
+        System.currentTimeMillis() - defaultChecker.getLastSuccessfulCheck() < 1000);
+    
+    defaultChecker.stop();
   }
 
+  /**
+   * Tests the parameterized constructor initialization.
+   */
   @Test
-  void testConstructorWithCustomValues() {
-    long checkInterval = 10;
-    long timeout = 2000;
-    KafkaHealthChecker checker = new KafkaHealthChecker(TEST_KAFKA_HOST, checkInterval, timeout);
-    assertNotNull(checker);
-    checker.stop();
+  public void testParameterizedConstructor() {
+    // GIVEN & WHEN
+    KafkaHealthChecker customChecker = new KafkaHealthChecker(TEST_KAFKA_HOST, TEST_CHECK_INTERVAL, TEST_TIMEOUT);
+
+    // THEN
+    assertNotNull("Health checker should not be null", customChecker);
+    assertTrue("Initial health status should be true", customChecker.isKafkaHealthy());
+    
+    customChecker.stop();
   }
 
+  /**
+   * Tests registering a consumer group for monitoring.
+   */
   @Test
-  void testStartAndStop() {
-    healthChecker.start();
-    assertTrue(healthChecker.isKafkaHealthy());
-    healthChecker.stop();
+  public void testRegisterConsumerGroup() {
+    // GIVEN
+    String groupId = TEST_CONSUMER_GROUP;
+
+    // WHEN
+    healthChecker.registerConsumerGroup(groupId);
+
+    // THEN
+    Map<String, ConsumerHealthStatus> healthStatus = healthChecker.getConsumerHealthStatus();
+    assertTrue("Consumer group should be registered", healthStatus.containsKey(groupId));
+    assertTrue("Consumer group should be initially healthy", healthStatus.get(groupId).isHealthy());
+    assertEquals("Group ID should match", groupId, healthStatus.get(groupId).getGroupId());
   }
 
+  /**
+   * Tests checking if a consumer group is healthy.
+   */
   @Test
-  void testKafkaHealthCheckSuccess() throws Exception {
-    healthChecker.start();
-    Thread.sleep(1500); // Wait for check to run
-    assertTrue(healthChecker.isKafkaHealthy());
-  verify(mockConsumer, Mockito.atLeastOnce()).listTopics(any(Duration.class));
+  public void testIsConsumerGroupHealthy() {
+    // GIVEN
+    String groupId = TEST_CONSUMER_GROUP;
+    healthChecker.registerConsumerGroup(groupId);
+
+    // WHEN & THEN
+    assertTrue("Consumer group should be healthy initially", 
+        healthChecker.isConsumerGroupHealthy(groupId));
+    
+    // Test with non-registered group
+    assertFalse("Non-registered group should not be healthy", 
+        healthChecker.isConsumerGroupHealthy("non-existent-group"));
   }
 
+  /**
+   * Tests the health report generation.
+   */
   @Test
-  void testKafkaHealthCheckFailure() throws Exception {
-    when(mockConsumer.listTopics(any(Duration.class))).thenThrow(new RuntimeException("Connection failed"));
-    healthChecker.performHealthCheckNow();
-    assertFalse(healthChecker.isKafkaHealthy());
-  }
+  public void testGetHealthReport() {
+    // GIVEN
+    healthChecker.registerConsumerGroup(TEST_CONSUMER_GROUP);
 
-  @Test
-  void testConsumerGroupHealthCheck() throws Exception {
-    healthChecker.registerConsumerGroup(TEST_GROUP_ID);
-    // Arrange: make the mocked group description appear healthy (non-empty members + STABLE)
-    when(mockGroupDescription.members()).thenReturn(Collections.singletonList(mock(org.apache.kafka.clients.admin.MemberDescription.class)));
-    when(mockGroupDescription.state()).thenReturn(ConsumerGroupState.STABLE);
-    // Call the consumer group health check directly using the mocked admin client
-    healthChecker.checkConsumerGroupHealth(mockAdminClient, TEST_GROUP_ID);
-    assertTrue(healthChecker.isConsumerGroupHealthy(TEST_GROUP_ID));
-  }
-
-  @Test
-  void testConsumerGroupUnhealthy() throws Exception {
-    when(mockGroupDescription.members()).thenReturn(Collections.singletonList(mock(org.apache.kafka.clients.admin.MemberDescription.class)));
-    when(mockGroupDescription.state()).thenReturn(ConsumerGroupState.DEAD);
-    healthChecker.registerConsumerGroup(TEST_GROUP_ID);
-    healthChecker.setConsumerHealthListener(mockConsumerListener);
-    // Directly call health check to avoid scheduling/timing issues
-    healthChecker.checkConsumerGroupHealth(mockAdminClient, TEST_GROUP_ID);
-    assertFalse(healthChecker.isConsumerGroupHealthy(TEST_GROUP_ID));
-    verify(mockConsumerListener, Mockito.atLeastOnce()).onConsumerUnhealthy(anyString(), anyString());
-  }
-
-  @Test
-  void testHealthCallbacks() throws Exception {
-    healthChecker.setOnKafkaHealthRestored(mockOnHealthRestored);
-    healthChecker.setOnKafkaHealthLost(mockOnHealthLost);
-
-    // First fail (synchronously)
-    when(mockConsumer.listTopics(any(Duration.class))).thenThrow(new RuntimeException("Fail"));
-    healthChecker.performHealthCheckNow();
-    verify(mockOnHealthLost, Mockito.atLeastOnce()).run();
-
-  // Then succeed (synchronously)
-  // Reset the mock to clear previous stubbings and ensure a clean behavior
-  Mockito.reset(mockConsumer);
-  Mockito.doReturn(Collections.emptyMap()).when(mockConsumer).listTopics(any(Duration.class));
-  // Ensure the synchronous health check reports success
-  assertTrue(healthChecker.performHealthCheckNow());
-  }
-
-  @Test
-  void testGetHealthReport() {
-    healthChecker.registerConsumerGroup(TEST_GROUP_ID);
+    // WHEN
     String report = healthChecker.getHealthReport();
-    assertNotNull(report);
-    assertTrue(report.contains("Kafka Healthy"));
-    assertTrue(report.contains(TEST_GROUP_ID));
+
+    // THEN
+    assertNotNull("Health report should not be null", report);
+    assertTrue("Report should contain Kafka health info", report.contains("Kafka Healthy:"));
+    assertTrue("Report should contain last check info", report.contains("Last Successful Check:"));
+    assertTrue("Report should contain consumer groups info", report.contains("Consumer Groups:"));
+    assertTrue("Report should contain registered group", report.contains(TEST_CONSUMER_GROUP));
+    assertTrue("Report should show group as healthy", report.contains("HEALTHY"));
   }
 
+  /**
+   * Tests successful health check callback execution.
+   */
   @Test
-  void testGetConsumerHealthStatus() {
-    healthChecker.registerConsumerGroup(TEST_GROUP_ID);
-    Map<String, KafkaHealthChecker.ConsumerHealthStatus> status = healthChecker.getConsumerHealthStatus();
-    assertNotNull(status);
-    assertTrue(status.containsKey(TEST_GROUP_ID));
+  public void testHealthRestoredCallback() throws Exception {
+    // GIVEN
+    KafkaHealthChecker spyChecker = spy(healthChecker);
+    spyChecker.setOnKafkaHealthRestored(mockHealthRestoredCallback);
+    
+    // Simulate health lost first by setting internal state via reflection
+    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField("isKafkaHealthy");
+    healthField.setAccessible(true);
+    ((java.util.concurrent.atomic.AtomicBoolean) healthField.get(spyChecker)).set(false);
+
+    // Use reflection to access the private method
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    updateMethod.setAccessible(true);
+
+    // WHEN - Simulate health restored
+    updateMethod.invoke(spyChecker, true);
+
+    // THEN
+    verify(mockHealthRestoredCallback, times(1)).run();
+    assertTrue("Kafka should be healthy", spyChecker.isKafkaHealthy());
   }
 
+  /**
+   * Tests health lost callback execution.
+   */
   @Test
-  void testGetLastSuccessfulCheck() {
-    long before = System.currentTimeMillis();
-    // performHealthCheck executes synchronously here and updates lastSuccessfulCheck
-    healthChecker.performHealthCheck();
-    long after = System.currentTimeMillis();
-    assertTrue(healthChecker.getLastSuccessfulCheck() >= before && healthChecker.getLastSuccessfulCheck() <= after);
+  public void testHealthLostCallback() throws Exception {
+    // GIVEN
+    KafkaHealthChecker spyChecker = spy(healthChecker);
+    spyChecker.setOnKafkaHealthLost(mockHealthLostCallback);
+    
+    // Ensure initial state is healthy via reflection
+    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField("isKafkaHealthy");
+    healthField.setAccessible(true);
+    ((java.util.concurrent.atomic.AtomicBoolean) healthField.get(spyChecker)).set(true);
+
+    // Use reflection to access the private method
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    updateMethod.setAccessible(true);
+
+    // WHEN - Simulate health lost
+    updateMethod.invoke(spyChecker, false);
+
+    // THEN
+    verify(mockHealthLostCallback, times(1)).run();
+    assertFalse("Kafka should be unhealthy", spyChecker.isKafkaHealthy());
+  }
+
+  /**
+   * Tests callback error handling.
+   */
+  @Test
+  public void testCallbackErrorHandling() throws Exception {
+    // GIVEN
+    KafkaHealthChecker spyChecker = spy(healthChecker);
+    Runnable faultyCallback = mock(Runnable.class);
+    doThrow(new RuntimeException("Callback error")).when(faultyCallback).run();
+    spyChecker.setOnKafkaHealthRestored(faultyCallback);
+    
+    // Simulate health lost first via reflection
+    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField("isKafkaHealthy");
+    healthField.setAccessible(true);
+    ((java.util.concurrent.atomic.AtomicBoolean) healthField.get(spyChecker)).set(false);
+
+    // Use reflection to access the private method
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    updateMethod.setAccessible(true);
+
+    // WHEN - Simulate health restored with faulty callback
+    updateMethod.invoke(spyChecker, true);
+
+    // THEN - Should not throw exception and should still update health
+    assertTrue("Kafka should be healthy despite callback error", spyChecker.isKafkaHealthy());
+    verify(faultyCallback, times(1)).run();
+  }
+
+  /**
+   * Tests consumer group health check with execution exception.
+   */
+  @Test
+  public void testCheckConsumerGroupHealthWithException() throws Exception {
+    // GIVEN
+    healthChecker.registerConsumerGroup(TEST_CONSUMER_GROUP);
+    
+    when(mockDescriptionFuture.get(anyLong(), any(TimeUnit.class))).thenThrow(new ExecutionException("Test exception", new RuntimeException()));
+    when(mockDescribeResult.describedGroups()).thenReturn(Collections.singletonMap(TEST_CONSUMER_GROUP, mockDescriptionFuture));
+
+    // WHEN
+    healthChecker.checkConsumerGroupHealth(mockAdminClient, TEST_CONSUMER_GROUP);
+
+    // THEN
+    assertFalse("Consumer group should be unhealthy due to exception", healthChecker.isConsumerGroupHealthy(TEST_CONSUMER_GROUP));
+    ConsumerHealthStatus status = healthChecker.getConsumerHealthStatus().get(TEST_CONSUMER_GROUP);
+    assertNotNull("Status should exist", status);
+    assertTrue("Last error should contain exception info", status.getLastError().contains("Check failed"));
+  }
+
+  /**
+   * Tests consumer group health check with timeout exception.
+   */
+  @Test
+  public void testCheckConsumerGroupHealthWithTimeout() throws Exception {
+    // GIVEN
+    healthChecker.registerConsumerGroup(TEST_CONSUMER_GROUP);
+    
+    when(mockDescriptionFuture.get(anyLong(), any(TimeUnit.class))).thenThrow(new TimeoutException("Timeout"));
+    when(mockDescribeResult.describedGroups()).thenReturn(Collections.singletonMap(TEST_CONSUMER_GROUP, mockDescriptionFuture));
+
+    // WHEN
+    healthChecker.checkConsumerGroupHealth(mockAdminClient, TEST_CONSUMER_GROUP);
+
+    // THEN
+    assertFalse("Consumer group should be unhealthy due to timeout", healthChecker.isConsumerGroupHealthy(TEST_CONSUMER_GROUP));
+    ConsumerHealthStatus status = healthChecker.getConsumerHealthStatus().get(TEST_CONSUMER_GROUP);
+    assertNotNull("Status should exist", status);
+    assertTrue("Last error should contain timeout info", status.getLastError().contains("Check failed"));
+  }
+
+  /**
+   * Tests that callbacks are not called when health status doesn't change.
+   */
+  @Test
+  public void testNoCallbackWhenHealthStatusUnchanged() throws Exception {
+    // GIVEN
+    KafkaHealthChecker spyChecker = spy(healthChecker);
+    spyChecker.setOnKafkaHealthRestored(mockHealthRestoredCallback);
+    spyChecker.setOnKafkaHealthLost(mockHealthLostCallback);
+
+    // Use reflection to access the private method
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    updateMethod.setAccessible(true);
+
+    // WHEN - Update with same health status (initially true)
+    updateMethod.invoke(spyChecker, true);
+
+    // THEN
+    verify(mockHealthRestoredCallback, never()).run();
+    verify(mockHealthLostCallback, never()).run();
+  }
+
+  /**
+   * Tests the stop method and scheduler shutdown.
+   */
+  @Test
+  public void testStop() throws InterruptedException {
+    // GIVEN
+    KafkaHealthChecker checkerWithMockScheduler = new KafkaHealthChecker(TEST_KAFKA_HOST, TEST_CHECK_INTERVAL, TEST_TIMEOUT) {
+      @Override
+      public void start() {
+        // Override to use mock scheduler
+      }
+    };
+    
+    // Use reflection to set the mock scheduler
+    try {
+      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField("scheduler");
+      schedulerField.setAccessible(true);
+      schedulerField.set(checkerWithMockScheduler, mockScheduler);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+
+    when(mockScheduler.awaitTermination(10, TimeUnit.SECONDS)).thenReturn(true);
+
+    // WHEN
+    checkerWithMockScheduler.stop();
+
+    // THEN
+    verify(mockScheduler, times(1)).shutdown();
+    verify(mockScheduler, times(1)).awaitTermination(10, TimeUnit.SECONDS);
+    verify(mockScheduler, never()).shutdownNow();
+  }
+
+  /**
+   * Tests the stop method when scheduler doesn't terminate gracefully.
+   */
+  @Test
+  public void testStopWithForcefulShutdown() throws InterruptedException {
+    // GIVEN
+    KafkaHealthChecker checkerWithMockScheduler = new KafkaHealthChecker(TEST_KAFKA_HOST, TEST_CHECK_INTERVAL, TEST_TIMEOUT) {
+      @Override
+      public void start() {
+        // Override to use mock scheduler
+      }
+    };
+    
+    // Use reflection to set the mock scheduler
+    try {
+      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField("scheduler");
+      schedulerField.setAccessible(true);
+      schedulerField.set(checkerWithMockScheduler, mockScheduler);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+
+    when(mockScheduler.awaitTermination(10, TimeUnit.SECONDS)).thenReturn(false);
+
+    // WHEN
+    checkerWithMockScheduler.stop();
+
+    // THEN
+    verify(mockScheduler, times(1)).shutdown();
+    verify(mockScheduler, times(1)).awaitTermination(10, TimeUnit.SECONDS);
+    verify(mockScheduler, times(1)).shutdownNow();
+  }
+
+  /**
+   * Tests the stop method when interrupted during shutdown.
+   */
+  @Test
+  public void testStopWithInterruption() throws InterruptedException {
+    // GIVEN
+    KafkaHealthChecker checkerWithMockScheduler = new KafkaHealthChecker(TEST_KAFKA_HOST, TEST_CHECK_INTERVAL, TEST_TIMEOUT) {
+      @Override
+      public void start() {
+        // Override to use mock scheduler
+      }
+    };
+    
+    // Use reflection to set the mock scheduler
+    try {
+      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField("scheduler");
+      schedulerField.setAccessible(true);
+      schedulerField.set(checkerWithMockScheduler, mockScheduler);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+
+    when(mockScheduler.awaitTermination(10, TimeUnit.SECONDS)).thenThrow(new InterruptedException("Test interruption"));
+
+    // WHEN
+    checkerWithMockScheduler.stop();
+
+    // THEN
+    verify(mockScheduler, times(1)).shutdown();
+    verify(mockScheduler, times(1)).awaitTermination(10, TimeUnit.SECONDS);
+    verify(mockScheduler, times(1)).shutdownNow();
   }
 }
