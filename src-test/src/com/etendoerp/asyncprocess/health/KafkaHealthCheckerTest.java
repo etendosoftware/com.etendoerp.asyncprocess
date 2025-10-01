@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -537,8 +538,9 @@ public class KafkaHealthCheckerTest {
     DescribeConsumerGroupsResult mockDescribe = mock(DescribeConsumerGroupsResult.class);
     KafkaFuture descKafkaFuture = mock(KafkaFuture.class);
     ConsumerGroupDescription mockDescription = mock(ConsumerGroupDescription.class);
-    when(mockDescription.members()).thenReturn(Collections.emptyList());
-    when(mockDescription.state()).thenReturn(org.apache.kafka.common.ConsumerGroupState.EMPTY);
+    // Use lenient stubbing to avoid unnecessary stubbing exception
+    lenient().when(mockDescription.members()).thenReturn(Collections.emptyList());
+    lenient().when(mockDescription.state()).thenReturn(org.apache.kafka.common.ConsumerGroupState.EMPTY);
 
     when(mockAdminClient.describeConsumerGroups(Collections.singleton(groupId))).thenReturn(mockDescribe);
     when(mockDescribe.describedGroups()).thenReturn(Collections.singletonMap(groupId, descKafkaFuture));

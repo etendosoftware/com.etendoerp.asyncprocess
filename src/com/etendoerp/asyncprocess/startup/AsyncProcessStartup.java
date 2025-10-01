@@ -21,8 +21,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -274,25 +272,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
-  private void scheduleRetrySetup() {
-    ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor();
-    retryScheduler.schedule(() -> {
-      try {
-        log.info("Retrying async process setup...");
-        circuitBreaker.execute(() -> {
-          performInitialSetup();
-          return true;
-        });
-        log.info("Retry setup completed successfully");
-      } catch (Exception e) {
-        log.warn("Retry setup failed, will try again later: {}", e.getMessage());
-        scheduleRetrySetup();
-      } finally {
-        retryScheduler.shutdown();
-      }
-    }, 30, TimeUnit.SECONDS);
-  }
-
   private void handleStartupFailure(Exception e) {
     log.error("Startup failure - attempting graceful degradation", e);
     try {
@@ -364,24 +343,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     } catch (Exception e) {
       log.error("Error during enhanced shutdown", e);
     }
-  }
-
-  public Map<String, Object> getSystemStatus() {
-    Map<String, Object> status = new HashMap<>();
-    status.put("initialized", isInitialized);
-    status.put("activeSubscriptions", activeSubscriptions.size());
-    if (healthChecker != null) {
-      status.put("kafkaHealthy", healthChecker.isKafkaHealthy());
-      status.put("healthReport", healthChecker.getHealthReport());
-    }
-    if (circuitBreaker != null) {
-      status.put("circuitBreakerState", circuitBreaker.getState());
-      status.put("circuitBreakerMetrics", circuitBreaker.getMetrics());
-    }
-    if (recoveryManager != null) status.put("recoveryStatus", recoveryManager.getRecoveryStatus());
-    if (reconfigurationManager != null) status.put("configurationStatus", reconfigurationManager.getConfigurationStatus());
-    if (processMonitor != null) status.put("monitoringReport", processMonitor.getStatusReport());
-    return status;
   }
 
   public void forceHealthCheck() {

@@ -10,16 +10,23 @@ import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_URL_KEY
 import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_URL_VALUE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
@@ -27,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
@@ -42,6 +51,7 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
+import org.mockito.MockedConstruction;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -49,6 +59,7 @@ import org.openbravo.base.session.OBPropertiesProvider;
 import org.openbravo.base.session.SessionFactoryController;
 import org.openbravo.base.util.OBClassLoader;
 import org.openbravo.base.weld.WeldUtils;
+import org.openbravo.base.exception.OBException;
 import org.openbravo.client.application.Process;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBCriteria;
@@ -58,6 +69,8 @@ import org.openbravo.model.ad.system.Client;
 import org.openbravo.model.common.enterprise.Organization;
 
 import com.etendoerp.asyncprocess.circuit.KafkaCircuitBreaker;
+import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
+import com.etendoerp.asyncprocess.config.AsyncProcessReconfigurationManager;
 import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
 import com.etendoerp.asyncprocess.monitoring.AsyncProcessMonitor;
 import com.etendoerp.asyncprocess.recovery.ConsumerRecoveryManager;
@@ -177,6 +190,7 @@ class AsyncProcessStartupTest {
     try {
       asyncProcessStartup.shutdown();
     } catch (Exception ignored) {
+      // Ignore exceptions during shutdown in setup
     }
   }
 
@@ -316,6 +330,226 @@ class AsyncProcessStartupTest {
 
     verify(kcm, times(1)).createAdminClient();
     verify(jp, times(1)).processAllJobs();
+  }
+
+  @Test
+  void testExecuteKafkaSetup_whenKafkaDisabled_doesNotCreateAdminClientOrProcessJobs() throws Exception {
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("false");
+
+    KafkaClientManager kcm = mock(KafkaClientManager.class);
+    injectKafkaClientManager(kcm);
+
+    JobProcessor jp = mock(JobProcessor.class);
+    injectJobProcessor(jp);
+
+    Method m = AsyncProcessStartup.class.getDeclaredMethod("executeKafkaSetup");
+    m.setAccessible(true);
+    m.invoke(asyncProcessStartup);
+
+    verify(kcm, times(0)).createAdminClient();
+    verify(jp, times(0)).processAllJobs();
+  }
+
+  @Test
+  void testExecuteKafkaSetup_whenAdminClientCreationFails_wrapsInOBException() throws Exception {
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("true");
+
+    KafkaClientManager kcm = mock(KafkaClientManager.class);
+    when(kcm.createAdminClient()).thenThrow(new RuntimeException("boom"));
+    injectKafkaClientManager(kcm);
+
+    JobProcessor jp = mock(JobProcessor.class);
+    injectJobProcessor(jp);
+
+    Method m = AsyncProcessStartup.class.getDeclaredMethod("executeKafkaSetup");
+    m.setAccessible(true);
+
+    InvocationTargetException exception = assertThrows(InvocationTargetException.class, () -> m.invoke(asyncProcessStartup));
+    assertTrue(exception.getCause() instanceof OBException);
+  }
+
+  @Test
+  void testExecuteKafkaSetup_whenJobProcessingFails_wrapsInOBException() throws Exception {
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("true");
+
+    KafkaClientManager kcm = mock(KafkaClientManager.class);
+    when(kcm.createAdminClient()).thenReturn(mockAdminClient);
+    injectKafkaClientManager(kcm);
+
+    JobProcessor jp = mock(JobProcessor.class);
+    doThrow(new RuntimeException("job failure")).when(jp).processAllJobs();
+    injectJobProcessor(jp);
+
+    Method m = AsyncProcessStartup.class.getDeclaredMethod("executeKafkaSetup");
+    m.setAccessible(true);
+
+    InvocationTargetException exception = assertThrows(InvocationTargetException.class, () -> m.invoke(asyncProcessStartup));
+    assertTrue(exception.getCause() instanceof OBException);
+    verify(kcm, times(1)).createAdminClient();
+  }
+
+  @Test
+  void testWaitForSetupCompletion_whenInterrupted_wrapsInOBExceptionAndReinterruptsThread() throws Exception {
+    AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
+    inject("processMonitor", monitor);
+    ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
+    when(recovery.isRecoveryEnabled()).thenReturn(false);
+    inject("recoveryManager", recovery);
+
+    Method method = AsyncProcessStartup.class.getDeclaredMethod("waitForSetupCompletion", CompletableFuture.class);
+    method.setAccessible(true);
+
+    CompletableFuture<Void> future = new CompletableFuture<>();
+
+    Thread.currentThread().interrupt();
+    try {
+      InvocationTargetException exception = assertThrows(InvocationTargetException.class, () -> method.invoke(asyncProcessStartup, future));
+      assertTrue(exception.getCause() instanceof OBException);
+      assertTrue(Thread.currentThread().isInterrupted());
+      verify(monitor).recordJobExecution(eq("SYSTEM_SETUP"), eq("Initial Setup Failed"), eq(0L), eq(false), eq(false));
+      verify(recovery).isRecoveryEnabled();
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void testWaitForSetupCompletion_whenExecutionFails_recordsFailureAndThrowsOBException() throws Exception {
+    AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
+    inject("processMonitor", monitor);
+    ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
+    when(recovery.isRecoveryEnabled()).thenReturn(true);
+    inject("recoveryManager", recovery);
+
+    Method method = AsyncProcessStartup.class.getDeclaredMethod("waitForSetupCompletion", CompletableFuture.class);
+    method.setAccessible(true);
+
+    CompletableFuture<Void> future = new CompletableFuture<>();
+    future.completeExceptionally(new RuntimeException("setup failure"));
+
+    InvocationTargetException exception = assertThrows(InvocationTargetException.class, () -> method.invoke(asyncProcessStartup, future));
+    assertTrue(exception.getCause() instanceof OBException);
+    verify(monitor).recordJobExecution(eq("SYSTEM_SETUP"), eq("Initial Setup Failed"), eq(0L), eq(false), eq(false));
+    verify(recovery).isRecoveryEnabled();
+  }
+
+  @Test
+  void testForceHealthCheckWhenKafkaUnhealthyDoesNotEnableRecovery() throws Exception {
+    KafkaHealthChecker checker = mock(KafkaHealthChecker.class);
+    when(checker.isKafkaHealthy()).thenReturn(false);
+    ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
+    AsyncProcessReconfigurationManager reconfigurationManager = mock(AsyncProcessReconfigurationManager.class);
+
+    inject("healthChecker", checker);
+    inject("recoveryManager", recovery);
+    inject("reconfigurationManager", reconfigurationManager);
+
+    asyncProcessStartup.forceHealthCheck();
+
+    verify(checker, times(2)).isKafkaHealthy();
+    verify(recovery, never()).setRecoveryEnabled(true);
+    verify(reconfigurationManager).forceConfigurationReload();
+  }
+
+  @Test
+  void testForceConsumerRecoveryWithoutManagerThrowsIllegalStateException() {
+    assertThrows(IllegalStateException.class, () -> asyncProcessStartup.forceConsumerRecovery("consumer-1"));
+  }
+
+  @Test
+  void testForceConsumerRecoveryPropagatesExceptions() throws Exception {
+    ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
+    inject("recoveryManager", recovery);
+    doThrow(new RuntimeException("recovery failure")).when(recovery).forceRecoverConsumer("consumer-2");
+
+    RuntimeException exception = assertThrows(RuntimeException.class, () -> asyncProcessStartup.forceConsumerRecovery("consumer-2"));
+
+    assertEquals("recovery failure", exception.getMessage());
+    verify(recovery).forceRecoverConsumer("consumer-2");
+  }
+
+  @Test
+  void testInitializeRecoveryManager_recreationFailureWrapsException() throws Exception {
+    KafkaHealthChecker checker = mock(KafkaHealthChecker.class);
+    inject("healthChecker", checker);
+
+    KafkaClientManager kcm = mock(KafkaClientManager.class);
+    inject("kafkaClientManager", kcm);
+
+    Method method = AsyncProcessStartup.class.getDeclaredMethod("initializeRecoveryManager");
+    method.setAccessible(true);
+    method.invoke(asyncProcessStartup);
+
+    Field recoveryField = AsyncProcessStartup.class.getDeclaredField("recoveryManager");
+    recoveryField.setAccessible(true);
+    ConsumerRecoveryManager recoveryManager = (ConsumerRecoveryManager) recoveryField.get(asyncProcessStartup);
+
+    Field functionField = ConsumerRecoveryManager.class.getDeclaredField("consumerRecreationFunction");
+    functionField.setAccessible(true);
+    ConsumerRecoveryManager.ConsumerRecreationFunction recreationFunction =
+        (ConsumerRecoveryManager.ConsumerRecreationFunction) functionField.get(recoveryManager);
+
+    AsyncProcessConfig config = mock(AsyncProcessConfig.class);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = mock(ConsumerRecoveryManager.ConsumerInfo.class);
+    when(consumerInfo.getTopic()).thenReturn("topic-1");
+    when(consumerInfo.isRegExp()).thenReturn(false);
+    when(consumerInfo.getConfig()).thenReturn(config);
+    when(consumerInfo.getGroupId()).thenReturn("group-1");
+    when(consumerInfo.getConsumerId()).thenReturn("consumer-1");
+
+    when(kcm.createReceiver("topic-1", false, config, "group-1"))
+        .thenThrow(new RuntimeException("receiver boom"));
+
+    OBException exception = assertThrows(OBException.class, () -> recreationFunction.recreateConsumer(consumerInfo));
+
+    assertEquals("Consumer recreation failed", exception.getMessage());
+    verify(kcm).createReceiver("topic-1", false, config, "group-1");
+  }
+
+  @Test
+  void testInitializeHealthCheckerHandlersTriggerRecoveryAndCircuitBreaker() throws Exception {
+    KafkaCircuitBreaker circuitBreaker = mock(KafkaCircuitBreaker.class);
+    inject("circuitBreaker", circuitBreaker);
+
+    ConsumerRecoveryManager recoveryManager = mock(ConsumerRecoveryManager.class);
+    inject("recoveryManager", recoveryManager);
+
+    Field initializedField = AsyncProcessStartup.class.getDeclaredField("isInitialized");
+    initializedField.setAccessible(true);
+    initializedField.setBoolean(asyncProcessStartup, true);
+
+    AtomicReference<Runnable> onRestoredRef = new AtomicReference<>();
+    AtomicReference<Runnable> onLostRef = new AtomicReference<>();
+
+    try (MockedConstruction<KafkaHealthChecker> mockedHealthChecker =
+             mockConstruction(KafkaHealthChecker.class, (mockChecker, context) -> {
+               when(mockChecker.isKafkaHealthy()).thenReturn(true);
+               doAnswer(invocation -> {
+                 onRestoredRef.set(invocation.getArgument(0));
+                 return null;
+               }).when(mockChecker).setOnKafkaHealthRestored(any(Runnable.class));
+               doAnswer(invocation -> {
+                 onLostRef.set(invocation.getArgument(0));
+                 return null;
+               }).when(mockChecker).setOnKafkaHealthLost(any(Runnable.class));
+             })) {
+
+      Method method = AsyncProcessStartup.class.getDeclaredMethod("initializeHealthChecker", String.class);
+      method.setAccessible(true);
+      method.invoke(asyncProcessStartup, "localhost:9092");
+
+      KafkaHealthChecker constructedChecker = mockedHealthChecker.constructed().get(0);
+      verify(constructedChecker).start();
+
+      onRestoredRef.get().run();
+      verify(recoveryManager).setRecoveryEnabled(true);
+
+      onLostRef.get().run();
+      verify(circuitBreaker).forceOpen();
+    }
   }
 
   /**
@@ -471,7 +705,7 @@ class AsyncProcessStartupTest {
     when(mockAdminClient.listTopics()).thenReturn(mockListTopicsResult);
     when(mockAdminClient.createTopics(ArgumentMatchers.<List<NewTopic>>any())).thenReturn(mockCreateTopicsResult);
 
-    mockedOBContext.when(() -> OBContext.setAdminMode()).then(inv -> null);
+    mockedOBContext.when(OBContext::setAdminMode).then(inv -> null);
     mockedOBContext.when(() -> OBContext.setAdminMode(true)).then(inv -> null);
     mockedOBContext.when(OBContext::restorePreviousMode).then(inv -> null);
     mockedOBContext.when(() -> OBContext.setOBContext(
