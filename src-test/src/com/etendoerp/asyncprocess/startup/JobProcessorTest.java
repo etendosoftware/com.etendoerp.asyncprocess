@@ -6,8 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Constructor;
@@ -18,6 +23,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,11 +32,17 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
 import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
+import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
 import com.etendoerp.asyncprocess.monitoring.AsyncProcessMonitor;
 import com.etendoerp.asyncprocess.recovery.ConsumerRecoveryManager;
+import com.smf.jobs.Action;
 
 import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
+import reactor.kafka.receiver.ReceiverRecord;
+import reactor.kafka.sender.KafkaSender;
 
 /**
  * Unit tests for the {@link JobProcessor} class.
@@ -447,5 +460,481 @@ class JobProcessorTest {
     }
     // Assertion added to ensure the test is meaningful and the warning is resolved
     assertNull(result, "Expected get() to return null for interface Action");
+  }
+
+  // ==================== NEW TESTS FOR LINES 281-333 ====================
+
+  /**
+   * Tests successful consumer creation and configuration (lines 281-333).
+   * Verifies that createAndConfigureConsumer properly creates a consumer with all components.
+   */
+  @Test
+  void testCreateAndConfigureConsumerSuccess() throws Exception {
+    // GIVEN
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn("TestJob");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    jobLines.add(jobLine);
+
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    Action mockAction = mock(Action.class);
+    actionSuppliers.put("test-jobline-id", () -> mockAction);
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
+    ReceiverRecord<String, AsyncProcessExecution> mockRecord = mock(ReceiverRecord.class);
+
+    // Store the callbacks to execute them later
+    Consumer<ReceiverRecord<String, AsyncProcessExecution>>[] onNextCallback = new Consumer[1];
+    Consumer<Throwable>[] onErrorCallback = new Consumer[1];
+
+    // Capture the doOnNext callback
+    when(mockReceiver.doOnNext(any(Consumer.class))).thenAnswer(invocation -> {
+      onNextCallback[0] = invocation.getArgument(0);
+      return mockReceiver;
+    });
+
+    // Capture the doOnError callback
+    when(mockReceiver.doOnError(any(Consumer.class))).thenAnswer(invocation -> {
+      onErrorCallback[0] = invocation.getArgument(0);
+      return mockReceiver;
+    });
+
+    // Mock subscribe to execute the onNext callback immediately
+    when(mockReceiver.subscribe(any(Consumer.class))).thenAnswer(invocation -> {
+      // Execute the captured doOnNext callback to trigger processMonitor.recordConsumerActivity
+      if (onNextCallback[0] != null) {
+        onNextCallback[0].accept(mockRecord);
+      }
+      return disposable;
+    });
+
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenReturn(mockReceiver);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> result = invokeCreateAndConfigureConsumer(creationConfig, 0);
+
+    // THEN
+    assertNotNull(result, "Consumer should be created successfully");
+    assertEquals(mockReceiver, result, "Returned Flux should be the created receiver");
+
+    // Verify active subscription was registered
+    String expectedConsumerId = "test-jobline-id-0";
+    assertTrue(activeSubscriptions.containsKey(expectedConsumerId), "Active subscription should be registered");
+
+    // Verify components were called
+    verify(processMonitor, times(1)).recordConsumerActivity(anyString(), anyString(), anyString());
+    verify(recoveryManager, times(1)).registerConsumer(any());
+    verify(healthChecker, times(1)).registerConsumerGroup(anyString());
+  }
+
+  /**
+   * Tests consumer creation when action factory is null (covering lines 276-279).
+   */
+  @Test
+  void testCreateAndConfigureConsumerNullActionFactory() throws Exception {
+    // GIVEN
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    // Empty action suppliers map - no action factory available
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> result = invokeCreateAndConfigureConsumer(creationConfig, 0);
+
+    // THEN
+    assertNull(result, "Should return null when action factory is not found");
+
+    // Verify no subscriptions were created
+    assertTrue(activeSubscriptions.isEmpty(), "No active subscriptions should be registered");
+
+    // Verify components were not called
+    verify(processMonitor, never()).recordConsumerActivity(anyString(), anyString(), anyString());
+    verify(recoveryManager, never()).registerConsumer(any());
+    verify(healthChecker, never()).registerConsumerGroup(anyString());
+  }
+
+  /**
+   * Tests consumer activity monitoring callback (lines 294-297).
+   */
+  @Test
+  void testConsumerActivityMonitoring() throws Exception {
+    // GIVEN
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn("TestJob");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    jobLines.add(jobLine);
+
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    Action mockAction = mock(Action.class);
+    actionSuppliers.put("test-jobline-id", () -> mockAction);
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
+    ReceiverRecord<String, AsyncProcessExecution> mockRecord = mock(ReceiverRecord.class);
+
+    // Store the callbacks to execute them later
+    Consumer<ReceiverRecord<String, AsyncProcessExecution>>[] onNextCallback = new Consumer[1];
+
+    // Capture the doOnNext callback and execute it immediately
+    when(mockReceiver.doOnNext(any(Consumer.class))).thenAnswer(invocation -> {
+      Consumer<ReceiverRecord<String, AsyncProcessExecution>> callback = invocation.getArgument(0);
+      onNextCallback[0] = callback;
+      // Execute the callback immediately to trigger recordConsumerActivity
+      callback.accept(mockRecord);
+      return mockReceiver;
+    });
+
+    when(mockReceiver.doOnError(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.subscribe(any(Consumer.class))).thenReturn(disposable);
+
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenReturn(mockReceiver);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    invokeCreateAndConfigureConsumer(creationConfig, 0);
+
+    // THEN
+    String expectedConsumerId = "test-jobline-id-0";
+    String expectedGroupId = "etendo-ap-group-testjob";
+    verify(processMonitor, times(1)).recordConsumerActivity(expectedConsumerId, expectedGroupId, "test-topic");
+  }
+
+  /**
+   * Tests consumer error handling callback (lines 298-305).
+   */
+  @Test
+  void testConsumerErrorHandling() throws Exception {
+    // GIVEN
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn("TestJob");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    jobLines.add(jobLine);
+
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    Action mockAction = mock(Action.class);
+    actionSuppliers.put("test-jobline-id", () -> mockAction);
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
+
+    RuntimeException testError = new RuntimeException("Connection lost");
+
+    when(mockReceiver.doOnNext(any(Consumer.class))).thenReturn(mockReceiver);
+
+    // Capture the doOnError callback and execute it immediately
+    when(mockReceiver.doOnError(any(Consumer.class))).thenAnswer(invocation -> {
+      Consumer<Throwable> callback = invocation.getArgument(0);
+      // Execute the callback immediately to trigger recordConsumerConnectionLost
+      callback.accept(testError);
+      return mockReceiver;
+    });
+
+    when(mockReceiver.subscribe(any(Consumer.class))).thenReturn(disposable);
+
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenReturn(mockReceiver);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    invokeCreateAndConfigureConsumer(creationConfig, 0);
+
+    // THEN
+    String expectedConsumerId = "test-jobline-id-0";
+    verify(processMonitor, times(1)).recordConsumerConnectionLost(expectedConsumerId);
+  }
+
+  /**
+   * Tests consumer creation without process monitor (null safety).
+   */
+  @Test
+  void testCreateAndConfigureConsumerNullProcessMonitor() throws Exception {
+    // GIVEN
+    JobProcessor processorWithNullMonitor = new JobProcessor(null, recoveryManager, healthChecker, activeSubscriptions, kafkaClientManager);
+
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn("TestJob");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    jobLines.add(jobLine);
+
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    Action mockAction = mock(Action.class);
+    actionSuppliers.put("test-jobline-id", () -> mockAction);
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
+
+    when(mockReceiver.doOnNext(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.doOnError(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.subscribe(any(Consumer.class))).thenReturn(disposable);
+
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenReturn(mockReceiver);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> result =
+        invokeCreateAndConfigureConsumerOnProcessor(processorWithNullMonitor, creationConfig, 0);
+
+    // THEN
+    assertNotNull(result, "Consumer should be created even without process monitor");
+
+    // Verify other components were still called
+    verify(recoveryManager, times(1)).registerConsumer(any());
+    verify(healthChecker, times(1)).registerConsumerGroup(anyString());
+  }
+
+  /**
+   * Tests recovery manager consumer registration (lines 307-327).
+   */
+  @Test
+  void testConsumerRecoveryInfoCreation() throws Exception {
+    // GIVEN
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn("TestJob");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    jobLines.add(jobLine);
+
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    Action mockAction = mock(Action.class);
+    actionSuppliers.put("test-jobline-id", () -> mockAction);
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
+
+    when(mockReceiver.doOnNext(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.doOnError(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.subscribe(any(Consumer.class))).thenReturn(disposable);
+
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenReturn(mockReceiver);
+    when(kafkaClientManager.getKafkaHost()).thenReturn("localhost:9092");
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    invokeCreateAndConfigureConsumer(creationConfig, 0);
+
+    // THEN
+    verify(recoveryManager, times(1)).registerConsumer(any(ConsumerRecoveryManager.ConsumerInfo.class));
+    verify(kafkaClientManager, times(1)).getKafkaHost();
+  }
+
+  /**
+   * Tests health checker registration (lines 329-331).
+   */
+  @Test
+  void testHealthCheckerRegistration() throws Exception {
+    // GIVEN
+    AsyncProcessConfig config = createTestAsyncProcessConfig();
+    List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
+
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+
+    // Mock Client and Organization to avoid NullPointerException
+    org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn("TestJob");
+    when(job.getClient()).thenReturn(mockClient);
+    when(job.getOrganization()).thenReturn(mockOrganization);
+    when(mockClient.getId()).thenReturn("test-client-id");
+    when(mockOrganization.getId()).thenReturn("test-org-id");
+
+    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getJobsJob()).thenReturn(job);
+
+    jobLines.add(jobLine);
+
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    Action mockAction = mock(Action.class);
+    actionSuppliers.put("test-jobline-id", () -> mockAction);
+
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+    Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
+
+    when(mockReceiver.doOnNext(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.doOnError(any(Consumer.class))).thenReturn(mockReceiver);
+    when(mockReceiver.subscribe(any(Consumer.class))).thenReturn(disposable);
+
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenReturn(mockReceiver);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+
+    // WHEN
+    invokeCreateAndConfigureConsumer(creationConfig, 0);
+
+    // THEN
+    String expectedGroupId = "etendo-ap-group-testjob";
+    verify(healthChecker, times(1)).registerConsumerGroup(expectedGroupId);
+  }
+
+  // ==================== HELPER METHODS ====================
+
+  /**
+   * Creates a test AsyncProcessConfig with default values.
+   */
+  private AsyncProcessConfig createTestAsyncProcessConfig() {
+    AsyncProcessConfig config = new AsyncProcessConfig();
+    config.setMaxRetries(3);
+    config.setRetryDelayMs(1000L);
+    config.setPrefetchCount(1);
+    return config;
+  }
+
+  /**
+   * Creates a ConsumerCreationConfig using reflection.
+   */
+  private Object createConsumerCreationConfig(
+      com.smf.jobs.model.Job job,
+      com.smf.jobs.model.JobLine jobLine,
+      List<com.smf.jobs.model.JobLine> jobLines,
+      String topic,
+      AsyncProcessConfig config,
+      KafkaSender<String, AsyncProcessExecution> kafkaSender,
+      Map<String, Supplier<Action>> actionSuppliers) throws Exception {
+
+    Class<?> configClass = Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig");
+    Constructor<?> ctor = configClass.getDeclaredConstructors()[0];
+    ctor.setAccessible(true);
+
+    return ctor.newInstance(job, jobLine, jobLines, topic, config, kafkaSender, actionSuppliers);
+  }
+
+  /**
+   * Invokes the createAndConfigureConsumer method using reflection.
+   */
+  private Flux<ReceiverRecord<String, AsyncProcessExecution>> invokeCreateAndConfigureConsumer(
+      Object creationConfig, int consumerIndex) throws Exception {
+    return invokeCreateAndConfigureConsumerOnProcessor(jobProcessor, creationConfig, consumerIndex);
+  }
+
+  /**
+   * Invokes the createAndConfigureConsumer method on a specific processor using reflection.
+   */
+  private Flux<ReceiverRecord<String, AsyncProcessExecution>> invokeCreateAndConfigureConsumerOnProcessor(
+      JobProcessor processor, Object creationConfig, int consumerIndex) throws Exception {
+
+    Class<?> configClass = Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig");
+    Method method = JobProcessor.class.getDeclaredMethod("createAndConfigureConsumer", configClass, int.class);
+    method.setAccessible(true);
+
+    return (Flux<ReceiverRecord<String, AsyncProcessExecution>>) method.invoke(processor, creationConfig, consumerIndex);
   }
 }

@@ -277,6 +277,9 @@ public class LogPersistorProcessor extends Action {
    * @return the extracted obuiapp_process_id or null if not found or parsing fails
    */
   private String extractFromNestedParams(JSONObject paramsJson) {
+    if (!paramsJson.has(PARAM_PARAMS) || paramsJson.isNull(PARAM_PARAMS)) {
+      return null;
+    }
     try {
       JSONObject nestedParamsJson = new JSONObject(paramsJson.getString(PARAM_PARAMS));
       return nestedParamsJson.optString(PARAM_OBUIAPP_PROCESS_ID);

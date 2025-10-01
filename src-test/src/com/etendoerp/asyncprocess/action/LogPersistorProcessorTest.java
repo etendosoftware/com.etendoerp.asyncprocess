@@ -1,5 +1,6 @@
 package com.etendoerp.asyncprocess.action;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyInt;
@@ -468,6 +469,462 @@ class LogPersistorProcessorTest {
       doNothing().when(obDal).save(any());
       doNothing().when(obDal).commitAndClose();
       doNothing().when(obDal).flush();
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with empty parameters string.
+   */
+  @Test
+  void testActionWithEmptyParams() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("params", "");
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with existing LogHeader.
+   */
+  @Test
+  void testActionWithExistingLogHeader() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    JSONObject after = new JSONObject();
+    after.put("assigned_user", "100");
+    after.put("assigned_role", "0");
+    after.put("ad_client_id", "0");
+    after.put("ad_org_id", "0");
+    JSONObject debeziumParams = new JSONObject();
+    debeziumParams.put("after", after);
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("params", debeziumParams.toString());
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    LogHeader existingLogHeader = spy(new LogHeader());
+    doReturn(new java.util.ArrayList<>()).when(existingLogHeader).getETAPLogList();
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      obContextMock.when(() -> OBContext.setOBContext(anyString(), anyString(), anyString(), anyString())).then(
+          invocation -> null);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(existingLogHeader);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with JWT token that fails to decode.
+   */
+  @Test
+  void testActionWithInvalidJWTToken() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    String invalidToken = "invalid.jwt.token";
+    JSONObject paramsJson = new JSONObject();
+    paramsJson.put("token", invalidToken);
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("params", paramsJson.toString());
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class);
+         MockedStatic<com.smf.securewebservices.utils.SecureWebServicesUtils> jwtMock = org.mockito.Mockito.mockStatic(
+             com.smf.securewebservices.utils.SecureWebServicesUtils.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      jwtMock.when(() -> com.smf.securewebservices.utils.SecureWebServicesUtils.decodeToken(invalidToken)).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with Debezium params missing after field.
+   */
+  @Test
+  void testActionWithDebeziumParamsMissingAfter() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    JSONObject debeziumParams = new JSONObject();
+    // No "after" field
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("params", debeziumParams.toString());
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with log parameter that has empty value.
+   */
+  @Test
+  void testActionWithEmptyLogParameter() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("log", "");
+    params.put("params", "test-params");
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with JSON description that needs pretty formatting.
+   */
+  @Test
+  void testActionWithJSONDescription() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    String jsonDescription = "{\"key1\":\"value1\",\"key2\":\"value2\"}";
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("log", jsonDescription);
+    params.put("params", "");
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with nested JSON description.
+   */
+  @Test
+  void testActionWithNestedJSONDescription() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    String nestedJsonDescription = "{\"outer\":\"{\\\"inner\\\":\\\"value\\\"}\"}";
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("log", nestedJsonDescription);
+    params.put("params", "");
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with description containing date prefix and JSON.
+   */
+  @Test
+  void testActionWithDatePrefixJSONDescription() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    String dateJsonDescription = "2023-10-01 12:00:00: {\"status\":\"completed\",\"result\":\"success\"}";
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("log", dateJsonDescription);
+    params.put("params", "");
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the getInputClass method.
+   */
+  @Test
+  void testGetInputClass() {
+    Class<?> inputClass = processor.getInputClass();
+    assertEquals(JSONObject.class, inputClass);
+  }
+
+  /**
+   * Tests the action method with invalid JSON in pretty description formatting.
+   */
+  @Test
+  void testActionWithInvalidJSONForPrettyDescription() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    String invalidJsonDescription = "{invalid json syntax}";
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("log", invalidJsonDescription);
+    params.put("params", "");
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
+      OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
+      when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
+      when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+      when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
+      when(obCriteria.uniqueResult()).thenReturn(null);
+
+      ActionResult result = processor.action(params, isStopped);
+      assertNotNull(result);
+    }
+  }
+
+  /**
+   * Tests the action method with Debezium params where assigned_user is "null" string.
+   */
+  @Test
+  void testActionWithDebeziumParamsNullStringUser() throws Exception {
+    Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
+    when(hooks.iterator()).thenReturn(mockIterator);
+    when(mockIterator.hasNext()).thenReturn(false);
+
+    JSONObject after = new JSONObject();
+    after.put("assigned_user", "null");
+    after.put("updatedby", "200");
+    after.put("assigned_role", "null");
+    after.put("ad_client_id", "0");
+    after.put("ad_org_id", "0");
+    JSONObject debeziumParams = new JSONObject();
+    debeziumParams.put("after", after);
+    JSONObject params = new JSONObject();
+    params.put("asyncProcessId", "test-id");
+    params.put("params", debeziumParams.toString());
+    params.put("state", "SUCCESS");
+    MutableBoolean isStopped = new MutableBoolean(false);
+
+    try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> obDalMock = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      OBContext obContext = mock(OBContext.class);
+      obContextMock.when(OBContext::getOBContext).thenReturn(obContext);
+      obContextMock.when(() -> OBContext.setOBContext(anyString(), anyString(), anyString(), anyString())).then(
+          invocation -> null);
+      when(obContext.isInAdministratorMode()).thenReturn(true);
+
+      OBDal obDal = mock(OBDal.class);
+      obDalMock.when(OBDal::getInstance).thenReturn(obDal);
+      doNothing().when(obDal).save(any());
+      doNothing().when(obDal).commitAndClose();
+      doNothing().when(obDal).flush();
+
+      LogHeader logHeaderSpy = spy(new LogHeader());
+      doReturn(new java.util.ArrayList<>()).when(logHeaderSpy).getETAPLogList();
+
       OBCriteria<LogHeader> obCriteria = mock(OBCriteria.class);
       when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
       when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
