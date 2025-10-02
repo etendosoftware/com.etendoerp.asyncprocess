@@ -38,12 +38,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.openbravo.base.session.SessionFactoryController;
+import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.core.SessionHandler;
+import org.openbravo.dal.service.OBCriteria;
+import org.openbravo.dal.service.OBDal;
 
 import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
 import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
@@ -333,6 +337,43 @@ class JobProcessorTest {
     verify(processMonitor, times(1)).recordConsumerConnectionLost(TEST_JOBLINE_ID_0);
   }
 
+  @Test
+  void testCreateSingleConsumerSafely_whenCreateReceiverThrows_returnsNull() throws Exception {
+    // Prepare job and jobline
+    com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
+    com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
+    org.openbravo.model.ad.system.Client client = mock(org.openbravo.model.ad.system.Client.class);
+    org.openbravo.model.common.enterprise.Organization org = mock(org.openbravo.model.common.enterprise.Organization.class);
+
+    when(job.getId()).thenReturn("job-ex");
+    when(job.getName()).thenReturn("JobEx");
+    when(job.getClient()).thenReturn(client);
+    when(job.getOrganization()).thenReturn(org);
+    when(client.getId()).thenReturn("client-ex");
+    when(org.getId()).thenReturn("org-ex");
+    when(jobLine.getId()).thenReturn("jobline-ex");
+    when(jobLine.getJobsJob()).thenReturn(job);
+    when(jobLine.getLineNo()).thenReturn(10L);
+
+    // Action supplier present so failure happens later (at receiver creation)
+    Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
+    actionSuppliers.put("jobline-ex", () -> mock(Action.class));
+
+    AsyncProcessConfig cfg = new AsyncProcessConfig();
+    KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
+
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, List.of(jobLine), "topic-ex", cfg, kafkaSender, actionSuppliers);
+
+    // Force createAndConfigureConsumer to throw inside by making createReceiver throw
+    when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
+        .thenThrow(new RuntimeException("receiver boom"));
+
+    Object result = invokePrivateMethod(jobProcessor, "createSingleConsumerSafely", new Class<?>[]{getConsumerConfigClass(), int.class}, creationConfig, 0);
+
+    assertNull(result, "Expected null receiver when exception occurs");
+    assertTrue(activeSubscriptions.isEmpty(), "No subscriptions should be registered after failure");
+  }
+
   private ConsumerTestSetup setupConsumerTest(boolean withActionFactory) throws Exception {
     AsyncProcessConfig config = new AsyncProcessConfig();
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
@@ -444,6 +485,83 @@ class JobProcessorTest {
     when(kafkaClientManager.createAdminClient()).thenThrow(new RuntimeException("boom"));
     jp.processAllJobs();
     verify(processMonitor, times(1)).recordKafkaConnection(false);
+  }
+
+  @Test
+  void testPreloadActionSuppliers_success() {
+    try (MockedStatic<OBContext> mockedOBContext = org.mockito.Mockito.mockStatic(OBContext.class)) {
+      mockedOBContext.when(() -> OBContext.setOBContext(anyString(), anyString(), anyString(), anyString())).then(inv -> null);
+      JobProcessor jp = spy(new JobProcessor(processMonitor, recoveryManager, healthChecker, new HashMap<>(), kafkaClientManager));
+      com.smf.jobs.model.Job mockJob = mock(com.smf.jobs.model.Job.class);
+      com.smf.jobs.model.JobLine mockJobLine = mock(com.smf.jobs.model.JobLine.class);
+      org.openbravo.client.application.Process mockProcess = mock(org.openbravo.client.application.Process.class);
+      when(mockJob.getJOBSJobLineList()).thenReturn(List.of(mockJobLine));
+      when(mockJobLine.getAction()).thenReturn(mockProcess);
+      when(mockJobLine.getId()).thenReturn("jobLine1");
+      when(mockProcess.getJavaClassName()).thenReturn("java.lang.String");
+      doReturn(List.of(mockJob)).when(jp).loadAsyncJobs();
+      Map<String, Supplier<Action>> suppliers = jp.preloadActionSuppliers();
+      assertEquals(1, suppliers.size());
+      assertTrue(suppliers.containsKey("jobLine1"));
+      assertNotNull(suppliers.get("jobLine1"));
+    }
+  }
+
+  @Test
+  void testPreloadActionSuppliers_classNotFoundThrowsOBException() {
+    try (MockedStatic<OBContext> mockedOBContext = org.mockito.Mockito.mockStatic(OBContext.class)) {
+      mockedOBContext.when(() -> OBContext.setOBContext(anyString(), anyString(), anyString(), anyString())).then(inv -> null);
+      JobProcessor jp = spy(new JobProcessor(processMonitor, recoveryManager, healthChecker, new HashMap<>(), kafkaClientManager));
+      com.smf.jobs.model.Job mockJob = mock(com.smf.jobs.model.Job.class);
+      com.smf.jobs.model.JobLine mockJobLine = mock(com.smf.jobs.model.JobLine.class);
+      org.openbravo.client.application.Process mockProcess = mock(org.openbravo.client.application.Process.class);
+      when(mockJob.getJOBSJobLineList()).thenReturn(List.of(mockJobLine));
+      when(mockJobLine.getAction()).thenReturn(mockProcess);
+      when(mockJobLine.getId()).thenReturn("jobLine2");
+      when(mockProcess.getJavaClassName()).thenReturn("non.existing.Clazz12345");
+      doReturn(List.of(mockJob)).when(jp).loadAsyncJobs();
+      assertThrows(org.openbravo.base.exception.OBException.class, jp::preloadActionSuppliers);
+    }
+  }
+
+  @Test
+  void testLoadAsyncJobs_returnsAsyncJobs() {
+    try (MockedStatic<OBContext> mockedOBContext = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> mockedOBDal = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      mockedOBContext.when(() -> OBContext.setOBContext(anyString(), anyString(), anyString(), anyString())).then(inv -> null);
+      JobProcessor jp = new JobProcessor(processMonitor, recoveryManager, healthChecker, new HashMap<>(), kafkaClientManager);
+      OBDal mockDal = mock(OBDal.class);
+      mockedOBDal.when(OBDal::getInstance).thenReturn(mockDal);
+      @SuppressWarnings("unchecked")
+      OBCriteria<com.smf.jobs.model.Job> mockCriteria = (OBCriteria<com.smf.jobs.model.Job>) mock(OBCriteria.class);
+      when(mockDal.createCriteria(com.smf.jobs.model.Job.class)).thenReturn(mockCriteria);
+      when(mockCriteria.add(any())).thenReturn(mockCriteria);
+      List<com.smf.jobs.model.Job> expected = List.of(mock(com.smf.jobs.model.Job.class), mock(com.smf.jobs.model.Job.class));
+      when(mockCriteria.list()).thenReturn(expected);
+      List<com.smf.jobs.model.Job> result = jp.loadAsyncJobs();
+      assertEquals(expected, result);
+      verify(mockCriteria, times(1)).add(any());
+    }
+  }
+
+  @Test
+  void testLoadAsyncJobs_returnsEmptyListWhenNoAsyncJobs() {
+    try (MockedStatic<OBContext> mockedOBContext = org.mockito.Mockito.mockStatic(OBContext.class);
+         MockedStatic<OBDal> mockedOBDal = org.mockito.Mockito.mockStatic(OBDal.class)) {
+      mockedOBContext.when(() -> OBContext.setOBContext(anyString(), anyString(), anyString(), anyString())).then(inv -> null);
+      JobProcessor jp = new JobProcessor(processMonitor, recoveryManager, healthChecker, new HashMap<>(), kafkaClientManager);
+      OBDal mockDal = mock(OBDal.class);
+      mockedOBDal.when(OBDal::getInstance).thenReturn(mockDal);
+      @SuppressWarnings("unchecked")
+      OBCriteria<com.smf.jobs.model.Job> mockCriteria = (OBCriteria<com.smf.jobs.model.Job>) mock(OBCriteria.class);
+      when(mockDal.createCriteria(com.smf.jobs.model.Job.class)).thenReturn(mockCriteria);
+      when(mockCriteria.add(any())).thenReturn(mockCriteria);
+      when(mockCriteria.list()).thenReturn(List.of());
+      List<com.smf.jobs.model.Job> result = jp.loadAsyncJobs();
+      assertNotNull(result);
+      assertTrue(result.isEmpty());
+      verify(mockCriteria, times(1)).add(any());
+    }
   }
 }
 
