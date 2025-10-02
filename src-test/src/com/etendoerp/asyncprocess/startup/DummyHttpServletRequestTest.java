@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class DummyHttpServletRequestTest {
 
+    public static final String LOCALHOST = "localhost";
+
     /**
      * Tests the default values and no-op behavior of all methods in DummyHttpServletRequest.
      * <p>
@@ -75,11 +77,11 @@ class DummyHttpServletRequestTest {
         assertEquals(Collections.emptyMap(), req.getParameterMap());
         assertEquals("HTTP/1.1", req.getProtocol());
         assertEquals("http", req.getScheme());
-        assertEquals("localhost", req.getServerName());
+        assertEquals(LOCALHOST, req.getServerName());
         assertEquals(8080, req.getServerPort());
         assertDoesNotThrow(() -> req.getReader());
         assertEquals("127.0.0.1", req.getRemoteAddr());
-        assertEquals("localhost", req.getRemoteHost());
+        assertEquals(LOCALHOST, req.getRemoteHost());
         assertDoesNotThrow(() -> req.setAttribute("a", 1));
         assertDoesNotThrow(() -> req.removeAttribute("a"));
         assertEquals(Locale.getDefault(), req.getLocale());
@@ -88,7 +90,7 @@ class DummyHttpServletRequestTest {
         assertNull(req.getRequestDispatcher("/any"));
         assertNull(req.getRealPath("/any"));
         assertEquals(0, req.getRemotePort());
-        assertEquals("localhost", req.getLocalName());
+        assertEquals(LOCALHOST, req.getLocalName());
         assertEquals("127.0.0.1", req.getLocalAddr());
         assertEquals(8080, req.getLocalPort());
         assertNull(req.getServletContext());

@@ -40,7 +40,7 @@ public class LogPersistorProcessor extends Action {
 
   @Inject
   @Any
-  private Instance<LogPersistorIdentifierHook> hooks;
+  protected Instance<LogPersistorIdentifierHook> hooks;
 
 
   @Override

@@ -17,6 +17,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +69,25 @@ import reactor.kafka.sender.KafkaSender;
 @MockitoSettings(strictness = Strictness.LENIENT)
 @ExtendWith(MockitoExtension.class)
 class JobProcessorTest {
+  private static final Logger log = LogManager.getLogger();
+  public static final String JOB_SCHEDULERS = "jobSchedulers";
+  public static final String ETAP_PARALLEL_THREADS = "etapParallelThreads";
+  public static final String CONFIGURE_JOB_SCHEDULER = "configureJobScheduler";
+  public static final String NOTANUMBER = "notanumber";
+  public static final String ETAP_MAX_RETRIES = "etapMaxRetries";
+  public static final String ETAP_RETRY_DELAY_MS = "etapRetryDelayMs";
+  public static final String ETAP_PREFETCH_COUNT = "etapPrefetchCount";
+  public static final String GET_JOB_LINE_CONFIG = "getJobLineConfig";
+  public static final String TEST_JOB = "TestJob";
+  public static final String CONSUMER_CREATION_CONFIG = "com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig";
+  public static final String TEST_JOB_ID = "test-job-id";
+  public static final String TEST_CLIENT_ID = "test-client-id";
+  public static final String TEST_ORG_ID = "test-org-id";
+  public static final String TEST_JOBLINE_ID = "test-jobline-id";
+  public static final String TEST_TOPIC = "test-topic";
+  public static final String TEST_JOBLINE_ID_0 = "test-jobline-id-0";
+  public static final String CREATE_ACTION_FACTORY = "createActionFactory";
+  public static final String ACTION_CLASS = "com.smf.jobs.Action";
 
   @Mock
   private AsyncProcessMonitor processMonitor;
@@ -118,15 +139,11 @@ class JobProcessorTest {
     try {
       // Close any open sessions safely
       if (SessionHandler.getInstance() != null) {
-        try {
-          SessionHandler.getInstance().commitAndClose();
-        } catch (Exception e) {
-          // Ignore errors during test cleanup
-        }
+        SessionHandler.getInstance().commitAndClose();
       }
     } catch (Exception e) {
       // Log warning but don't fail the test
-      System.err.println("Warning: Error closing session during test teardown: " + e.getMessage());
+      log.error("Warning: Error closing session during test teardown: {}", e.getMessage());
     }
 
     // Restore original SessionFactoryController
@@ -159,7 +176,7 @@ class JobProcessorTest {
   void testShutdownSchedulersWithActiveSchedulers() throws Exception {
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     when(scheduler.awaitTermination(anyLong(), any())).thenReturn(true);
-    Field schedulersField = JobProcessor.class.getDeclaredField("jobSchedulers");
+    Field schedulersField = JobProcessor.class.getDeclaredField(JOB_SCHEDULERS);
     schedulersField.setAccessible(true); // NOSONAR - Reflection is required for testing private fields
     @SuppressWarnings("unchecked")
     Map<String, ScheduledExecutorService> schedulers = (Map<String, ScheduledExecutorService>) schedulersField.get(
@@ -179,7 +196,7 @@ class JobProcessorTest {
   void testShutdownSchedulersWithInterruptedException() throws Exception {
     ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
     when(scheduler.awaitTermination(anyLong(), any())).thenThrow(new InterruptedException());
-    Field schedulersField = JobProcessor.class.getDeclaredField("jobSchedulers");
+    Field schedulersField = JobProcessor.class.getDeclaredField(JOB_SCHEDULERS);
     schedulersField.setAccessible(true); // NOSONAR - Reflection is required for testing private fields
     @SuppressWarnings("unchecked")
     Map<String, ScheduledExecutorService> schedulers = (Map<String, ScheduledExecutorService>) schedulersField.get(
@@ -199,11 +216,11 @@ class JobProcessorTest {
   void testConfigureJobSchedulerCreatesScheduler() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     when(job.getId()).thenReturn("job1");
-    when(job.get("etapParallelThreads")).thenReturn("2");
-    Method method = JobProcessor.class.getDeclaredMethod("configureJobScheduler", com.smf.jobs.model.Job.class);
+    when(job.get(ETAP_PARALLEL_THREADS)).thenReturn("2");
+    Method method = JobProcessor.class.getDeclaredMethod(CONFIGURE_JOB_SCHEDULER, com.smf.jobs.model.Job.class);
     method.setAccessible(true);
     method.invoke(jobProcessor, job);
-    Field schedulersField = JobProcessor.class.getDeclaredField("jobSchedulers");
+    Field schedulersField = JobProcessor.class.getDeclaredField(JOB_SCHEDULERS);
     schedulersField.setAccessible(true); // NOSONAR - Reflection is required for testing private fields
     @SuppressWarnings("unchecked")
     Map<String, ScheduledExecutorService> schedulers = (Map<String, ScheduledExecutorService>) schedulersField.get(
@@ -220,15 +237,15 @@ class JobProcessorTest {
   @Test
   void testGetJobParallelThreadsWithValidAndInvalidValues() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
-    when(job.get("etapParallelThreads")).thenReturn("4");
+    when(job.get(ETAP_PARALLEL_THREADS)).thenReturn("4");
     Method method = JobProcessor.class.getDeclaredMethod("getJobParallelThreads", com.smf.jobs.model.Job.class);
     method.setAccessible(true);
     int threads = (int) method.invoke(jobProcessor, job);
     assertEquals(4, threads);
-    when(job.get("etapParallelThreads")).thenReturn(null);
+    when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(null);
     threads = (int) method.invoke(jobProcessor, job);
     assertEquals(8, threads); // DEFAULT_PARALLEL_THREADS
-    when(job.get("etapParallelThreads")).thenReturn("notanumber");
+    when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(NOTANUMBER);
     when(job.getId()).thenReturn("job1");
     threads = (int) method.invoke(jobProcessor, job);
     assertEquals(8, threads); // fallback to default
@@ -243,21 +260,21 @@ class JobProcessorTest {
   @Test
   void testGetJobLineConfigWithValidAndInvalidValues() throws Exception {
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
-    when(jobLine.get("etapMaxRetries")).thenReturn("5");
-    when(jobLine.get("etapRetryDelayMs")).thenReturn("2000");
-    when(jobLine.get("etapPrefetchCount")).thenReturn("3");
-    Method method = JobProcessor.class.getDeclaredMethod("getJobLineConfig", com.smf.jobs.model.JobLine.class);
+    when(jobLine.get(ETAP_MAX_RETRIES)).thenReturn("5");
+    when(jobLine.get(ETAP_RETRY_DELAY_MS)).thenReturn("2000");
+    when(jobLine.get(ETAP_PREFETCH_COUNT)).thenReturn("3");
+    Method method = JobProcessor.class.getDeclaredMethod(GET_JOB_LINE_CONFIG, com.smf.jobs.model.JobLine.class);
     method.setAccessible(true);
     Object config = method.invoke(jobProcessor, jobLine);
     assertNotNull(config);
-    when(jobLine.get("etapMaxRetries")).thenReturn(null);
-    when(jobLine.get("etapRetryDelayMs")).thenReturn(null);
-    when(jobLine.get("etapPrefetchCount")).thenReturn(null);
+    when(jobLine.get(ETAP_MAX_RETRIES)).thenReturn(null);
+    when(jobLine.get(ETAP_RETRY_DELAY_MS)).thenReturn(null);
+    when(jobLine.get(ETAP_PREFETCH_COUNT)).thenReturn(null);
     config = method.invoke(jobProcessor, jobLine);
     assertNotNull(config);
-    when(jobLine.get("etapMaxRetries")).thenReturn("notanumber");
-    when(jobLine.get("etapRetryDelayMs")).thenReturn("notanumber");
-    when(jobLine.get("etapPrefetchCount")).thenReturn("notanumber");
+    when(jobLine.get(ETAP_MAX_RETRIES)).thenReturn(NOTANUMBER);
+    when(jobLine.get(ETAP_RETRY_DELAY_MS)).thenReturn(NOTANUMBER);
+    when(jobLine.get(ETAP_PREFETCH_COUNT)).thenReturn(NOTANUMBER);
     config = method.invoke(jobProcessor, jobLine);
     assertNotNull(config);
   }
@@ -272,7 +289,7 @@ class JobProcessorTest {
   void testCalculateErrorTopic() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     when(job.getEtapErrortopic()).thenReturn(null);
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getName()).thenReturn(TEST_JOB);
     Method method = JobProcessor.class.getDeclaredMethod("calculateErrorTopic", com.smf.jobs.model.Job.class);
     method.setAccessible(true);
     String topic = (String) method.invoke(jobProcessor, job);
@@ -291,7 +308,7 @@ class JobProcessorTest {
   @Test
   void testCalculateNextTopic() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getName()).thenReturn(TEST_JOB);
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(jobLine.getJobsJob()).thenReturn(job);
     when(jobLine.getEtapTargettopic()).thenReturn(null);
@@ -318,7 +335,7 @@ class JobProcessorTest {
   void testCalculateCurrentTopic() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     when(job.getEtapInitialTopic()).thenReturn(null);
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getName()).thenReturn(TEST_JOB);
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(jobLine.getJobsJob()).thenReturn(job);
     when(jobLine.getLineNo()).thenReturn(1L);
@@ -421,11 +438,11 @@ class JobProcessorTest {
    */
   @Test
   void testCreateConsumersForJobLineAndCreateSingleConsumerSafely() throws Exception {
-    Class<?> configClass = Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig");
+    Class<?> configClass = Class.forName(CONSUMER_CREATION_CONFIG);
     Constructor<?> ctor = configClass.getDeclaredConstructors()[0];
     ctor.setAccessible(true);
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getName()).thenReturn(TEST_JOB);
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(jobLine.getJobsJob()).thenReturn(job);
     List<com.smf.jobs.model.JobLine> jobLines = new ArrayList<>();
@@ -489,21 +506,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -537,7 +554,7 @@ class JobProcessorTest {
     when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
         .thenReturn(mockReceiver);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     Flux<ReceiverRecord<String, AsyncProcessExecution>> result = invokeCreateAndConfigureConsumer(creationConfig, 0);
@@ -547,7 +564,7 @@ class JobProcessorTest {
     assertEquals(mockReceiver, result, "Returned Flux should be the created receiver");
 
     // Verify active subscription was registered
-    String expectedConsumerId = "test-jobline-id-0";
+    String expectedConsumerId = TEST_JOBLINE_ID_0;
     assertTrue(activeSubscriptions.containsKey(expectedConsumerId), "Active subscription should be registered");
 
     // Verify components were called
@@ -570,7 +587,7 @@ class JobProcessorTest {
 
     // Mock Client and Organization removed — not needed for this test case
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     // Empty action suppliers map - no action factory available
@@ -578,7 +595,7 @@ class JobProcessorTest {
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     Flux<ReceiverRecord<String, AsyncProcessExecution>> result = invokeCreateAndConfigureConsumer(creationConfig, 0);
@@ -611,21 +628,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -649,15 +666,16 @@ class JobProcessorTest {
     when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
         .thenReturn(mockReceiver);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     invokeCreateAndConfigureConsumer(creationConfig, 0);
 
     // THEN
-    String expectedConsumerId = "test-jobline-id-0";
+    String expectedConsumerId = TEST_JOBLINE_ID_0;
     String expectedGroupId = "etendo-ap-group-testjob";
-    verify(processMonitor, times(1)).recordConsumerActivity(expectedConsumerId, expectedGroupId, "test-topic");
+    verify(processMonitor, times(1)).recordConsumerActivity(expectedConsumerId, expectedGroupId,
+        TEST_TOPIC);
   }
 
   /**
@@ -676,21 +694,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -712,13 +730,13 @@ class JobProcessorTest {
     when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
         .thenReturn(mockReceiver);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     invokeCreateAndConfigureConsumer(creationConfig, 0);
 
     // THEN
-    String expectedConsumerId = "test-jobline-id-0";
+    String expectedConsumerId = TEST_JOBLINE_ID_0;
     verify(processMonitor, times(1)).recordConsumerConnectionLost(expectedConsumerId);
   }
 
@@ -740,21 +758,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -766,7 +784,7 @@ class JobProcessorTest {
     when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
         .thenReturn(mockReceiver);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     Flux<ReceiverRecord<String, AsyncProcessExecution>> result =
@@ -796,21 +814,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -823,7 +841,7 @@ class JobProcessorTest {
         .thenReturn(mockReceiver);
     when(kafkaClientManager.getKafkaHost()).thenReturn("localhost:9092");
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     invokeCreateAndConfigureConsumer(creationConfig, 0);
@@ -849,21 +867,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -875,7 +893,7 @@ class JobProcessorTest {
     when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
         .thenReturn(mockReceiver);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     invokeCreateAndConfigureConsumer(creationConfig, 0);
@@ -905,22 +923,22 @@ class JobProcessorTest {
   void testConfigureJobScheduler() throws Exception {
     // GIVEN
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.get("etapParallelThreads")).thenReturn("4");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.get(ETAP_PARALLEL_THREADS)).thenReturn("4");
 
     // WHEN
-    Method method = JobProcessor.class.getDeclaredMethod("configureJobScheduler", com.smf.jobs.model.Job.class);
+    Method method = JobProcessor.class.getDeclaredMethod(CONFIGURE_JOB_SCHEDULER, com.smf.jobs.model.Job.class);
     method.setAccessible(true);
     method.invoke(jobProcessor, job);
 
     // THEN
-    Field schedulersField = JobProcessor.class.getDeclaredField("jobSchedulers");
+    Field schedulersField = JobProcessor.class.getDeclaredField(JOB_SCHEDULERS);
     schedulersField.setAccessible(true);
     @SuppressWarnings("unchecked")
     Map<String, ScheduledExecutorService> schedulers = (Map<String, ScheduledExecutorService>) schedulersField.get(jobProcessor);
 
-    assertTrue(schedulers.containsKey("test-job-id"), "Scheduler should be created for the job");
-    assertNotNull(schedulers.get("test-job-id"), "Scheduler should not be null");
+    assertTrue(schedulers.containsKey(TEST_JOB_ID), "Scheduler should be created for the job");
+    assertNotNull(schedulers.get(TEST_JOB_ID), "Scheduler should not be null");
   }
 
   /**
@@ -931,15 +949,15 @@ class JobProcessorTest {
     // GIVEN
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     when(job.getId()).thenReturn("test-job-default");
-    when(job.get("etapParallelThreads")).thenReturn(null);
+    when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(null);
 
     // WHEN
-    Method method = JobProcessor.class.getDeclaredMethod("configureJobScheduler", com.smf.jobs.model.Job.class);
+    Method method = JobProcessor.class.getDeclaredMethod(CONFIGURE_JOB_SCHEDULER, com.smf.jobs.model.Job.class);
     method.setAccessible(true);
     method.invoke(jobProcessor, job);
 
     // THEN
-    Field schedulersField = JobProcessor.class.getDeclaredField("jobSchedulers");
+    Field schedulersField = JobProcessor.class.getDeclaredField(JOB_SCHEDULERS);
     schedulersField.setAccessible(true);
     @SuppressWarnings("unchecked")
     Map<String, ScheduledExecutorService> schedulers = (Map<String, ScheduledExecutorService>) schedulersField.get(jobProcessor);
@@ -963,20 +981,20 @@ class JobProcessorTest {
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
 
     // Mock the required job and jobLine properties that are used in the processJobLine method
-    when(job.getName()).thenReturn("TestJob");
-    when(job.getId()).thenReturn("test-job-id");
+    when(job.getName()).thenReturn(TEST_JOB);
+    when(job.getId()).thenReturn(TEST_JOB_ID);
     when(job.getEtapInitialTopic()).thenReturn(null); // Will use default topic calculation
     when(job.getEtapErrortopic()).thenReturn(null); // Will use default error topic
     when(job.isEtapConsumerPerPartition()).thenReturn(false);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
     when(jobLine.getLineNo()).thenReturn(1L);
     when(jobLine.getEtapTargettopic()).thenReturn(null); // Will use default next topic calculation
     when(jobLine.isEtapConsumerPerPartition()).thenReturn(false);
-    when(jobLine.get("etapMaxRetries")).thenReturn("3");
-    when(jobLine.get("etapRetryDelayMs")).thenReturn("1000");
-    when(jobLine.get("etapPrefetchCount")).thenReturn("1");
+    when(jobLine.get(ETAP_MAX_RETRIES)).thenReturn("3");
+    when(jobLine.get(ETAP_RETRY_DELAY_MS)).thenReturn("1000");
+    when(jobLine.get(ETAP_PREFETCH_COUNT)).thenReturn("1");
 
     when(kafkaClientManager.getNumPartitions()).thenReturn(1);
 
@@ -991,7 +1009,7 @@ class JobProcessorTest {
 
     // THEN
     assertNotNull(result, "Result should not be null");
-    assertEquals("test-jobline-id", result.getKey(), "Job line ID should match");
+    assertEquals(TEST_JOBLINE_ID, result.getKey(), "Job line ID should match");
     assertNotNull(result.getValue(), "Receivers list should not be null");
     verify(kafkaClientManager, times(1)).existsOrCreateTopic(any(AdminClient.class), anyString(), anyInt());
   }
@@ -1012,21 +1030,21 @@ class JobProcessorTest {
     org.openbravo.model.ad.system.Client mockClient = mock(org.openbravo.model.ad.system.Client.class);
     org.openbravo.model.common.enterprise.Organization mockOrganization = mock(org.openbravo.model.common.enterprise.Organization.class);
 
-    when(job.getId()).thenReturn("test-job-id");
-    when(job.getName()).thenReturn("TestJob");
+    when(job.getId()).thenReturn(TEST_JOB_ID);
+    when(job.getName()).thenReturn(TEST_JOB);
     when(job.getClient()).thenReturn(mockClient);
     when(job.getOrganization()).thenReturn(mockOrganization);
-    when(mockClient.getId()).thenReturn("test-client-id");
-    when(mockOrganization.getId()).thenReturn("test-org-id");
+    when(mockClient.getId()).thenReturn(TEST_CLIENT_ID);
+    when(mockOrganization.getId()).thenReturn(TEST_ORG_ID);
 
-    when(jobLine.getId()).thenReturn("test-jobline-id");
+    when(jobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(jobLine.getJobsJob()).thenReturn(job);
 
     jobLines.add(jobLine);
 
     Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
     Action mockAction = mock(Action.class);
-    actionSuppliers.put("test-jobline-id", () -> mockAction);
+    actionSuppliers.put(TEST_JOBLINE_ID, () -> mockAction);
 
     KafkaSender<String, AsyncProcessExecution> kafkaSender = mock(KafkaSender.class);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> mockReceiver = mock(Flux.class);
@@ -1038,11 +1056,11 @@ class JobProcessorTest {
     when(kafkaClientManager.createReceiver(anyString(), anyBoolean(), any(AsyncProcessConfig.class), anyString()))
         .thenReturn(mockReceiver);
 
-    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, "test-topic", config, kafkaSender, actionSuppliers);
+    Object creationConfig = createConsumerCreationConfig(job, jobLine, jobLines, TEST_TOPIC, config, kafkaSender, actionSuppliers);
 
     // WHEN
     Method method = JobProcessor.class.getDeclaredMethod("createSingleConsumerSafely",
-        Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig"), int.class);
+        Class.forName(CONSUMER_CREATION_CONFIG), int.class);
     method.setAccessible(true);
     Flux<ReceiverRecord<String, AsyncProcessExecution>> result =
         (Flux<ReceiverRecord<String, AsyncProcessExecution>>) method.invoke(jobProcessor, creationConfig, 0);
@@ -1067,9 +1085,9 @@ class JobProcessorTest {
     jobLines.add(mockJobLine);
 
     when(mockJob.getJOBSJobLineList()).thenReturn(jobLines);
-    when(mockJobLine.getId()).thenReturn("test-jobline-id");
+    when(mockJobLine.getId()).thenReturn(TEST_JOBLINE_ID);
     when(mockJobLine.getAction()).thenReturn(mockProcess);
-    when(mockProcess.getJavaClassName()).thenReturn("com.smf.jobs.Action"); // Use a valid class that exists
+    when(mockProcess.getJavaClassName()).thenReturn(ACTION_CLASS); // Use a valid class that exists
     mockJobs.add(mockJob);
 
     // WHEN - Test the action supplier creation logic directly
@@ -1081,7 +1099,8 @@ class JobProcessorTest {
         if (jobLine.getAction() != null) {
           try {
             // Test the createActionFactory method directly
-            Method createActionFactoryMethod = JobProcessor.class.getDeclaredMethod("createActionFactory", org.openbravo.client.application.Process.class);
+            Method createActionFactoryMethod = JobProcessor.class.getDeclaredMethod(
+                CREATE_ACTION_FACTORY, org.openbravo.client.application.Process.class);
             createActionFactoryMethod.setAccessible(true);
 
             @SuppressWarnings("unchecked")
@@ -1098,10 +1117,10 @@ class JobProcessorTest {
     // THEN
     assertNotNull(actionSuppliers, "Action suppliers map should not be null");
     assertFalse(actionSuppliers.isEmpty(), "Action suppliers map should not be empty");
-    assertTrue(actionSuppliers.containsKey("test-jobline-id"), "Should contain action supplier for job line");
+    assertTrue(actionSuppliers.containsKey(TEST_JOBLINE_ID), "Should contain action supplier for job line");
 
     // Verify the supplier works
-    Supplier<Action> supplier = actionSuppliers.get("test-jobline-id");
+    Supplier<Action> supplier = actionSuppliers.get(TEST_JOBLINE_ID);
     assertNotNull(supplier, "Supplier should not be null");
 
     // Note: We can't test the actual supplier.get() call because it requires Weld context,
@@ -1118,7 +1137,7 @@ class JobProcessorTest {
     when(mockProcess.getJavaClassName()).thenReturn("com.smf.jobs.TestAction");
 
     // WHEN
-    Method method = JobProcessor.class.getDeclaredMethod("createActionFactory", org.openbravo.client.application.Process.class);
+    Method method = JobProcessor.class.getDeclaredMethod(CREATE_ACTION_FACTORY, org.openbravo.client.application.Process.class);
     method.setAccessible(true);
     Supplier<Action> result = (Supplier<Action>) method.invoke(jobProcessor, mockProcess);
 
@@ -1138,7 +1157,7 @@ class JobProcessorTest {
     when(mockProcess.getJavaClassName()).thenReturn("com.nonexistent.InvalidClass");
 
     // WHEN & THEN
-    Method method = JobProcessor.class.getDeclaredMethod("createActionFactory", org.openbravo.client.application.Process.class);
+    Method method = JobProcessor.class.getDeclaredMethod(CREATE_ACTION_FACTORY, org.openbravo.client.application.Process.class);
     method.setAccessible(true);
 
     // Call the method on the jobProcessor instance, not null
@@ -1167,7 +1186,7 @@ class JobProcessorTest {
       KafkaSender<String, AsyncProcessExecution> kafkaSender,
       Map<String, Supplier<Action>> actionSuppliers) throws Exception {
 
-    Class<?> configClass = Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig");
+    Class<?> configClass = Class.forName(CONSUMER_CREATION_CONFIG);
     Constructor<?> ctor = configClass.getDeclaredConstructors()[0];
     ctor.setAccessible(true);
 
@@ -1188,7 +1207,7 @@ class JobProcessorTest {
   private Flux<ReceiverRecord<String, AsyncProcessExecution>> invokeCreateAndConfigureConsumerOnProcessor(
       JobProcessor processor, Object creationConfig, int consumerIndex) throws Exception {
 
-    Class<?> configClass = Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$ConsumerCreationConfig");
+    Class<?> configClass = Class.forName(CONSUMER_CREATION_CONFIG);
     Method method = JobProcessor.class.getDeclaredMethod("createAndConfigureConsumer", configClass, int.class);
     method.setAccessible(true);
 
@@ -1232,7 +1251,7 @@ class JobProcessorTest {
    * Tests processAllJobs with no jobs configured.
    */
   @Test
-  void testProcessAllJobs_noJobs_doesNotCreateAdminClient() {
+  void testProcessAllJobs_noJobsDoesNotCreateAdminClient() {
     AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
     ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
     KafkaHealthChecker checker = mock(KafkaHealthChecker.class);
@@ -1257,7 +1276,7 @@ class JobProcessorTest {
    * Tests processAllJobs when admin client creation fails.
    */
   @Test
-  void testProcessAllJobs_whenAdminClientCreationFails_recordsKafkaConnectionFalse() {
+  void testProcessAllJobs_whenAdminClientCreationFailsRecordsKafkaConnectionFalse() {
     AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
     ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
     KafkaHealthChecker checker = mock(KafkaHealthChecker.class);

@@ -45,6 +45,9 @@ class AlertProcessTest {
   private static final String ROLE_ID = "42D0EEB1C66F497A90DD526DC597E6F0";
   private static final String CLIENT_ID = "23C59575B9CF467C9620760EB255B389";
   private static final String ORG_ID = "0";
+  public static final String ALERT_CREATED = "Alert created";
+  public static final String AFTER = "after";
+  public static final String DOCUMENTNO = "documentno";
 
   @Mock
   private OBContext mockOBContext;
@@ -126,7 +129,7 @@ class AlertProcessTest {
     // Assert
     assertNotNull(result);
     assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals("Alert created", result.getMessage());
+    assertEquals(ALERT_CREATED, result.getMessage());
 
     // Verify OBContext was set correctly
     mockedOBContext.verify(() -> OBContext.setOBContext(USER_ID, ROLE_ID, CLIENT_ID, ORG_ID), times(1));
@@ -173,7 +176,7 @@ class AlertProcessTest {
     JSONObject parameters = new JSONObject();
     JSONObject after = new JSONObject();
     // Not adding 'documentno' to simulate missing field
-    parameters.put("after", after);
+    parameters.put(AFTER, after);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     // Act
@@ -198,7 +201,7 @@ class AlertProcessTest {
   void testActionNullAfterObject() throws JSONException {
     // Arrange
     JSONObject parameters = new JSONObject();
-    parameters.put("after", JSONObject.NULL);
+    parameters.put(AFTER, JSONObject.NULL);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     // Act
@@ -232,8 +235,8 @@ class AlertProcessTest {
     // Arrange
     JSONObject parameters = new JSONObject();
     JSONObject after = new JSONObject();
-    after.put("documentno", ""); // Empty document number
-    parameters.put("after", after);
+    after.put(DOCUMENTNO, ""); // Empty document number
+    parameters.put(AFTER, after);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     // Act
@@ -242,7 +245,7 @@ class AlertProcessTest {
     // Assert
     assertNotNull(result);
     assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals("Alert created", result.getMessage());
+    assertEquals(ALERT_CREATED, result.getMessage());
 
     // Verify database operations were performed
     verify(mockOBDal, times(1)).save(any(Alert.class));
@@ -259,8 +262,8 @@ class AlertProcessTest {
     // Arrange
     JSONObject parameters = new JSONObject();
     JSONObject after = new JSONObject();
-    after.put("documentno", "DOC-001/2023#$%"); // Special characters
-    parameters.put("after", after);
+    after.put(DOCUMENTNO, "DOC-001/2023#$%"); // Special characters
+    parameters.put(AFTER, after);
     MutableBoolean isStopped = new MutableBoolean(false);
 
     // Act
@@ -269,7 +272,7 @@ class AlertProcessTest {
     // Assert
     assertNotNull(result);
     assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals("Alert created", result.getMessage());
+    assertEquals(ALERT_CREATED, result.getMessage());
 
     // Verify database operations were performed
     verify(mockOBDal, times(1)).save(any(Alert.class));
@@ -293,7 +296,7 @@ class AlertProcessTest {
     // Assert - Process should still succeed as isStopped is not checked
     assertNotNull(result);
     assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals("Alert created", result.getMessage());
+    assertEquals(ALERT_CREATED, result.getMessage());
   }
 
   /**
@@ -302,8 +305,8 @@ class AlertProcessTest {
   private JSONObject createValidParameters() throws JSONException {
     JSONObject parameters = new JSONObject();
     JSONObject after = new JSONObject();
-    after.put("documentno", TEST_DOCUMENT_NO);
-    parameters.put("after", after);
+    after.put(DOCUMENTNO, TEST_DOCUMENT_NO);
+    parameters.put(AFTER, after);
     return parameters;
   }
 }

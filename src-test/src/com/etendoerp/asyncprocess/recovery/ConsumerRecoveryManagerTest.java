@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -53,6 +55,12 @@ import reactor.kafka.sender.KafkaSender;
  * It is designed to work without requiring changes to the ConsumerRecoveryManager implementation.
  */
 class ConsumerRecoveryManagerTest {
+  private static final Logger log = LogManager.getLogger();
+
+  public static final String TEST_GROUP = "testGroup";
+  public static final String TEST_TOPIC = "testTopic";
+  public static final String JOB_LINE_ID = "jobLineId";
+  public static final String RECOVER_CONSUMER = "recoverConsumer";
   /**
    * The ConsumerRecoveryManager instance under test.
    */
@@ -190,8 +198,8 @@ class ConsumerRecoveryManagerTest {
     Map<String, Object> consumerStatus = consumers.get(consumerInfo.getConsumerId());
 
     assertNotNull(consumerStatus);
-    assertEquals("testGroup", consumerStatus.get("groupId"));
-    assertEquals("testTopic", consumerStatus.get("topic"));
+    assertEquals(TEST_GROUP, consumerStatus.get("groupId"));
+    assertEquals(TEST_TOPIC, consumerStatus.get("topic"));
     assertEquals(false, consumerStatus.get("active"));
     assertEquals(true, consumerStatus.get("subscriptionActive"));
     assertEquals(3, consumerStatus.get("recoveryAttempts"));
@@ -285,7 +293,7 @@ class ConsumerRecoveryManagerTest {
         .actionFactory(() -> null)
         .kafkaSender(mock(KafkaSender.class));
     Exception ex = assertThrows(IllegalArgumentException.class, builder::build);
-    assertTrue(ex.getMessage().contains("jobLineId"));
+    assertTrue(ex.getMessage().contains(JOB_LINE_ID));
   }
 
   /**
@@ -325,11 +333,11 @@ class ConsumerRecoveryManagerTest {
   void testConsumerInfoGettersAndSetters() {
     ConsumerRecoveryManager.ConsumerInfo info = buildDummyConsumerInfo();
     assertEquals("testConsumer", info.getConsumerId());
-    assertEquals("testGroup", info.getGroupId());
-    assertEquals("testTopic", info.getTopic());
+    assertEquals(TEST_GROUP, info.getGroupId());
+    assertEquals(TEST_TOPIC, info.getTopic());
     assertFalse(info.isRegExp());
     assertNotNull(info.getConfig());
-    assertEquals("jobLineId", info.getJobLineId());
+    assertEquals(JOB_LINE_ID, info.getJobLineId());
     assertNotNull(info.getActionFactory());
     assertEquals("nextTopic", info.getNextTopic());
     assertEquals("errorTopic", info.getErrorTopic());
@@ -405,7 +413,7 @@ class ConsumerRecoveryManagerTest {
     consumerInfo.setSubscription(disposable);
     localManager.registerConsumer(consumerInfo);
     localManager.setConsumerRecreationFunction(info -> Flux.empty());
-    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumer",
+    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod(RECOVER_CONSUMER,
         ConsumerRecoveryManager.ConsumerInfo.class, String.class);
     recoverConsumer.setAccessible(true);
     assertDoesNotThrow(() -> recoverConsumer.invoke(localManager, consumerInfo, "test"));
@@ -425,7 +433,7 @@ class ConsumerRecoveryManagerTest {
     localManager.setConsumerRecreationFunction(info -> {
       throw new RuntimeException("fail");
     });
-    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumer",
+    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod(RECOVER_CONSUMER,
         ConsumerRecoveryManager.ConsumerInfo.class, String.class);
     recoverConsumer.setAccessible(true);
     Exception ex = assertThrows(java.lang.reflect.InvocationTargetException.class, () ->
@@ -461,12 +469,13 @@ class ConsumerRecoveryManagerTest {
     ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
     localManager.registerConsumer(consumerInfo);
     localManager.setConsumerRecreationFunction(info -> Flux.error(new RuntimeException("fail")));
-    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod("recoverConsumer",
+    var recoverConsumer = ConsumerRecoveryManager.class.getDeclaredMethod(RECOVER_CONSUMER,
         ConsumerRecoveryManager.ConsumerInfo.class, String.class);
     recoverConsumer.setAccessible(true);
     try {
       recoverConsumer.invoke(localManager, consumerInfo, "test");
     } catch (Exception ignored) {
+      log.error("Expected exception during consumer recovery", ignored);
     }
     assertTrue(true);
   }
@@ -496,11 +505,11 @@ class ConsumerRecoveryManagerTest {
   private ConsumerRecoveryManager.ConsumerInfo buildDummyConsumerInfo() {
     return new ConsumerRecoveryManager.ConsumerInfo.Builder()
         .consumerId("testConsumer")
-        .groupId("testGroup")
-        .topic("testTopic")
+        .groupId(TEST_GROUP)
+        .topic(TEST_TOPIC)
         .isRegExp(false)
         .config(mock(AsyncProcessConfig.class))
-        .jobLineId("jobLineId")
+        .jobLineId(JOB_LINE_ID)
         .actionFactory(mock(Supplier.class))
         .nextTopic("nextTopic")
         .errorTopic("errorTopic")

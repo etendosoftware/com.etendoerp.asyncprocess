@@ -4,7 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -51,6 +53,11 @@ public class KafkaHealthCheckerTest {
   private static final String TEST_CONSUMER_GROUP = "etendo-ap-group-test";
   private static final long TEST_CHECK_INTERVAL = 5;
   private static final long TEST_TIMEOUT = 1000;
+  public static final String IS_KAFKA_HEALTHY = "isKafkaHealthy";
+  public static final String UPDATE_KAFKA_HEALTH = "updateKafkaHealth";
+  public static final String STATUS_SHOULD_EXIST = "Status should exist";
+  public static final String SCHEDULER = "scheduler";
+  public static final String CHECK_CONSUMER_GROUPS = "checkConsumerGroups";
 
   @Mock
   private ScheduledExecutorService mockScheduler;
@@ -71,6 +78,9 @@ public class KafkaHealthCheckerTest {
   private Runnable mockHealthRestoredCallback;
   private Runnable mockHealthLostCallback;
 
+  /**
+   * Sets up the test environment before each test case.
+   */
   @Before
   public void setUp() {
     MockitoAnnotations.openMocks(this);
@@ -84,6 +94,9 @@ public class KafkaHealthCheckerTest {
     healthChecker.setConsumerHealthListener(mockConsumerHealthListener);
   }
 
+  /**
+   * Cleans up resources after each test case.
+   */
   @After
   public void tearDown() {
     if (healthChecker != null) {
@@ -181,6 +194,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests successful health check callback execution.
+   * @throws Exception if reflection access fails
    */
   @Test
   public void testHealthRestoredCallback() throws Exception {
@@ -189,12 +203,14 @@ public class KafkaHealthCheckerTest {
     spyChecker.setOnKafkaHealthRestored(mockHealthRestoredCallback);
     
     // Simulate health lost first by setting internal state via reflection
-    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField("isKafkaHealthy");
+    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField(
+        IS_KAFKA_HEALTHY);
     healthField.setAccessible(true);
     ((java.util.concurrent.atomic.AtomicBoolean) healthField.get(spyChecker)).set(false);
 
     // Use reflection to access the private method
-    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod(
+        UPDATE_KAFKA_HEALTH, boolean.class);
     updateMethod.setAccessible(true);
 
     // WHEN - Simulate health restored
@@ -207,6 +223,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests health lost callback execution.
+   * @throws Exception if reflection access fails
    */
   @Test
   public void testHealthLostCallback() throws Exception {
@@ -215,12 +232,14 @@ public class KafkaHealthCheckerTest {
     spyChecker.setOnKafkaHealthLost(mockHealthLostCallback);
     
     // Ensure initial state is healthy via reflection
-    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField("isKafkaHealthy");
+    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField(
+        IS_KAFKA_HEALTHY);
     healthField.setAccessible(true);
     ((java.util.concurrent.atomic.AtomicBoolean) healthField.get(spyChecker)).set(true);
 
     // Use reflection to access the private method
-    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod(
+        UPDATE_KAFKA_HEALTH, boolean.class);
     updateMethod.setAccessible(true);
 
     // WHEN - Simulate health lost
@@ -233,6 +252,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests callback error handling.
+   * @throws Exception if reflection access fails
    */
   @Test
   public void testCallbackErrorHandling() throws Exception {
@@ -243,12 +263,14 @@ public class KafkaHealthCheckerTest {
     spyChecker.setOnKafkaHealthRestored(faultyCallback);
     
     // Simulate health lost first via reflection
-    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField("isKafkaHealthy");
+    java.lang.reflect.Field healthField = KafkaHealthChecker.class.getDeclaredField(
+        IS_KAFKA_HEALTHY);
     healthField.setAccessible(true);
     ((java.util.concurrent.atomic.AtomicBoolean) healthField.get(spyChecker)).set(false);
 
     // Use reflection to access the private method
-    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod(
+        UPDATE_KAFKA_HEALTH, boolean.class);
     updateMethod.setAccessible(true);
 
     // WHEN - Simulate health restored with faulty callback
@@ -278,7 +300,7 @@ public class KafkaHealthCheckerTest {
 
     // Verify consumer group status exists
     ConsumerHealthStatus status = healthChecker.getConsumerHealthStatus().get(TEST_CONSUMER_GROUP);
-    assertNotNull("Status should exist", status);
+    assertNotNull(STATUS_SHOULD_EXIST, status);
     assertTrue("Should be initially healthy", status.isHealthy());
   }
 
@@ -303,13 +325,14 @@ public class KafkaHealthCheckerTest {
     // THEN
     assertFalse("Consumer group should be unhealthy due to timeout",
         healthChecker.isConsumerGroupHealthy(TEST_CONSUMER_GROUP));
-    assertNotNull("Status should exist", status);
+    assertNotNull(STATUS_SHOULD_EXIST, status);
     assertTrue("Last error should contain timeout info",
         status.getLastError().contains("timeout"));
   }
 
   /**
    * Tests that callbacks are not called when health status doesn't change.
+   * @throws Exception if reflection access fails
    */
   @Test
   public void testNoCallbackWhenHealthStatusUnchanged() throws Exception {
@@ -319,7 +342,8 @@ public class KafkaHealthCheckerTest {
     spyChecker.setOnKafkaHealthLost(mockHealthLostCallback);
 
     // Use reflection to access the private method
-    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod(
+        UPDATE_KAFKA_HEALTH, boolean.class);
     updateMethod.setAccessible(true);
 
     // WHEN - Update with same health status (initially true)
@@ -332,6 +356,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests the stop method and scheduler shutdown.
+   * @throws InterruptedException if interrupted while waiting for termination
    */
   @Test
   public void testStop() throws InterruptedException {
@@ -345,7 +370,7 @@ public class KafkaHealthCheckerTest {
     
     // Use reflection to set the mock scheduler
     try {
-      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField("scheduler");
+      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField(SCHEDULER);
       schedulerField.setAccessible(true);
       schedulerField.set(checkerWithMockScheduler, mockScheduler);
     } catch (Exception e) {
@@ -365,6 +390,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests the stop method when scheduler doesn't terminate gracefully.
+   * @throws InterruptedException if interrupted while waiting for termination
    */
   @Test
   public void testStopWithForcefulShutdown() throws InterruptedException {
@@ -378,7 +404,7 @@ public class KafkaHealthCheckerTest {
     
     // Use reflection to set the mock scheduler
     try {
-      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField("scheduler");
+      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField(SCHEDULER);
       schedulerField.setAccessible(true);
       schedulerField.set(checkerWithMockScheduler, mockScheduler);
     } catch (Exception e) {
@@ -398,6 +424,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests the stop method when interrupted during shutdown.
+   * @throws InterruptedException if interrupted while waiting for termination
    */
   @Test
   public void testStopWithInterruption() throws InterruptedException {
@@ -411,7 +438,7 @@ public class KafkaHealthCheckerTest {
     
     // Use reflection to set the mock scheduler
     try {
-      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField("scheduler");
+      java.lang.reflect.Field schedulerField = KafkaHealthChecker.class.getDeclaredField(SCHEDULER);
       schedulerField.setAccessible(true);
       schedulerField.set(checkerWithMockScheduler, mockScheduler);
     } catch (Exception e) {
@@ -431,6 +458,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests checkConsumerGroups when there are no matching groups returned by AdminClient.
+   * @throws Exception if reflection access fails
    */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -449,7 +477,8 @@ public class KafkaHealthCheckerTest {
       adminStatic.when(() -> AdminClient.create(Mockito.any(Properties.class))).thenReturn(mockAdminClient);
 
       // call private method
-      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod("checkConsumerGroups");
+      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod(
+          CHECK_CONSUMER_GROUPS);
       method.setAccessible(true);
 
       // WHEN
@@ -463,6 +492,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests checkConsumerGroups when a matching group is healthy.
+   * @throws Exception if reflection access fails
    */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -502,7 +532,8 @@ public class KafkaHealthCheckerTest {
       adminStatic.when(() -> AdminClient.create(Mockito.any(Properties.class))).thenReturn(mockAdminClient);
 
       // call private method
-      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod("checkConsumerGroups");
+      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod(
+          CHECK_CONSUMER_GROUPS);
       method.setAccessible(true);
 
       // WHEN
@@ -510,7 +541,7 @@ public class KafkaHealthCheckerTest {
 
       // THEN
       ConsumerHealthStatus updated = healthChecker.getConsumerHealthStatus().get(groupId);
-      assertNotNull("Status should exist", updated);
+      assertNotNull(STATUS_SHOULD_EXIST, updated);
       assertTrue("Group should be healthy", updated.isHealthy());
       verify(mockConsumerHealthListener, times(1)).onConsumerHealthy(groupId);
     }
@@ -518,6 +549,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests checkConsumerGroups when a matching group becomes unhealthy.
+   * @throws Exception if reflection access fails
    */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -557,7 +589,8 @@ public class KafkaHealthCheckerTest {
       adminStatic.when(() -> AdminClient.create(Mockito.any(Properties.class))).thenReturn(mockAdminClient);
 
       // call private method
-      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod("checkConsumerGroups");
+      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod(
+          CHECK_CONSUMER_GROUPS);
       method.setAccessible(true);
 
       // WHEN
@@ -565,7 +598,7 @@ public class KafkaHealthCheckerTest {
 
       // THEN - status should be unhealthy and listener called with reason
       ConsumerHealthStatus updated = healthChecker.getConsumerHealthStatus().get(groupId);
-      assertNotNull("Status should exist", updated);
+      assertNotNull(STATUS_SHOULD_EXIST, updated);
       assertFalse("Group should be unhealthy", updated.isHealthy());
       assertNotNull("Last error should be set", updated.getLastError());
       verify(mockConsumerHealthListener, times(1)).onConsumerUnhealthy(eq(groupId), any(String.class));
@@ -641,6 +674,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests health callback execution when no callbacks are set.
+   * @throws Exception if reflection access fails
    */
   @Test
   public void testHealthCallbacksNotSet() throws Exception {
@@ -648,7 +682,8 @@ public class KafkaHealthCheckerTest {
     KafkaHealthChecker checkerWithoutCallbacks = new KafkaHealthChecker(TEST_KAFKA_HOST);
 
     // Use reflection to access the private method
-    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod("updateKafkaHealth", boolean.class);
+    java.lang.reflect.Method updateMethod = KafkaHealthChecker.class.getDeclaredMethod(
+        UPDATE_KAFKA_HEALTH, boolean.class);
     updateMethod.setAccessible(true);
 
     // WHEN & THEN - Should not throw exception when no callbacks are set
@@ -698,6 +733,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests exception handling in checkConsumerGroups method.
+   * @throws Exception if reflection access fails
    */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -712,7 +748,8 @@ public class KafkaHealthCheckerTest {
           .thenThrow(new RuntimeException("Connection error"));
 
       // Access private method
-      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod("checkConsumerGroups");
+      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod(
+          CHECK_CONSUMER_GROUPS);
       method.setAccessible(true);
 
       // WHEN
@@ -725,6 +762,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests timeout handling in health checks.
+   * @throws Exception if reflection access fails
    */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -746,7 +784,8 @@ public class KafkaHealthCheckerTest {
       adminStatic.when(() -> AdminClient.create(Mockito.any(Properties.class))).thenReturn(mockAdminClient);
 
       // Access private method
-      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod("checkConsumerGroups");
+      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod(
+          CHECK_CONSUMER_GROUPS);
       method.setAccessible(true);
 
       // WHEN
@@ -759,6 +798,7 @@ public class KafkaHealthCheckerTest {
 
   /**
    * Tests ExecutionException handling in health checks.
+   * @throws Exception if reflection access fails
    */
   @Test
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -780,7 +820,8 @@ public class KafkaHealthCheckerTest {
       adminStatic.when(() -> AdminClient.create(Mockito.any(Properties.class))).thenReturn(mockAdminClient);
 
       // Access private method
-      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod("checkConsumerGroups");
+      java.lang.reflect.Method method = KafkaHealthChecker.class.getDeclaredMethod(
+          CHECK_CONSUMER_GROUPS);
       method.setAccessible(true);
 
       // WHEN

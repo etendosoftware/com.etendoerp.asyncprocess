@@ -42,6 +42,14 @@ import com.smf.jobs.ActionResult;
  */
 class LogPersistorProcessorTest {
 
+  public static final String ASSIGNED_USER = "assigned_user";
+  public static final String ASSIGNED_ROLE = "assigned_role";
+  public static final String AD_CLIENT_ID = "ad_client_id";
+  public static final String AD_ORG_ID = "ad_org_id";
+  public static final String ASYNC_PROCESS_ID = "asyncProcessId";
+  public static final String PARAMS = "params";
+  public static final String STATE = "state";
+  public static final String TEST_ID = "test-id";
   /**
    * Mocked CDI Instance for hooks injection.
    */
@@ -88,16 +96,16 @@ class LogPersistorProcessorTest {
 
     // Build the params JSON as a nested string for Debezium
     JSONObject after = new JSONObject();
-    after.put("assigned_user", "100");
-    after.put("assigned_role", "0");
-    after.put("ad_client_id", "0");
-    after.put("ad_org_id", "0");
+    after.put(ASSIGNED_USER, "100");
+    after.put(ASSIGNED_ROLE, "0");
+    after.put(AD_CLIENT_ID, "0");
+    after.put(AD_ORG_ID, "0");
     JSONObject debeziumParams = new JSONObject();
     debeziumParams.put("after", after);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", debeziumParams.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, debeziumParams.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     // Static mock for OBContext and OBDal
@@ -144,9 +152,9 @@ class LogPersistorProcessorTest {
   @Test
   void testActionWithMalformedParamsJson() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", "{malformed_json}");
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, "{malformed_json}");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     Iterator<LogPersistorIdentifierHook> mockIterator = mock(Iterator.class);
@@ -194,9 +202,9 @@ class LogPersistorProcessorTest {
     JSONObject paramsJson = new JSONObject();
     paramsJson.put("token", fakeToken);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", paramsJson.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, paramsJson.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     com.auth0.jwt.interfaces.DecodedJWT jwt = mock(com.auth0.jwt.interfaces.DecodedJWT.class);
@@ -257,15 +265,15 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject after = new JSONObject();
-    after.put("assigned_user", ""); // userId vacío
-    after.put("ad_client_id", "0");
-    after.put("ad_org_id", "0");
+    after.put(ASSIGNED_USER, ""); // userId vacío
+    after.put(AD_CLIENT_ID, "0");
+    after.put(AD_ORG_ID, "0");
     JSONObject debeziumParams = new JSONObject();
     debeziumParams.put("after", after);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", debeziumParams.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, debeziumParams.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -311,11 +319,11 @@ class LogPersistorProcessorTest {
     JSONObject nestedParams = new JSONObject();
     nestedParams.put("obuiapp_process_id", "nested-process-id");
     JSONObject paramsJson = new JSONObject();
-    paramsJson.put("params", nestedParams.toString());
+    paramsJson.put(PARAMS, nestedParams.toString());
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", paramsJson.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, paramsJson.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -363,16 +371,16 @@ class LogPersistorProcessorTest {
     when(hooks.iterator()).thenReturn(iterator);
 
     JSONObject after = new JSONObject();
-    after.put("assigned_user", "100");
-    after.put("assigned_role", "0");
-    after.put("ad_client_id", "0");
-    after.put("ad_org_id", "0");
+    after.put(ASSIGNED_USER, "100");
+    after.put(ASSIGNED_ROLE, "0");
+    after.put(AD_CLIENT_ID, "0");
+    after.put(AD_ORG_ID, "0");
     JSONObject debeziumParams = new JSONObject();
     debeziumParams.put("after", after);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", debeziumParams.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, debeziumParams.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -413,10 +421,10 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", "{}");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, "{}");
     params.put("log", "Texto plano no JSON");
-    params.put("state", "SUCCESS");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -450,10 +458,10 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", "{}");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, "{}");
     params.put("log", "{malformed: json, sin comillas}");
-    params.put("state", "SUCCESS");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -490,9 +498,9 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", "");
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, "");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -531,16 +539,16 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject after = new JSONObject();
-    after.put("assigned_user", "100");
-    after.put("assigned_role", "0");
-    after.put("ad_client_id", "0");
-    after.put("ad_org_id", "0");
+    after.put(ASSIGNED_USER, "100");
+    after.put(ASSIGNED_ROLE, "0");
+    after.put(AD_CLIENT_ID, "0");
+    after.put(AD_ORG_ID, "0");
     JSONObject debeziumParams = new JSONObject();
     debeziumParams.put("after", after);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", debeziumParams.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, debeziumParams.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     LogHeader existingLogHeader = spy(new LogHeader());
@@ -584,9 +592,9 @@ class LogPersistorProcessorTest {
     JSONObject paramsJson = new JSONObject();
     paramsJson.put("token", invalidToken);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", paramsJson.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, paramsJson.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -631,9 +639,9 @@ class LogPersistorProcessorTest {
     JSONObject debeziumParams = new JSONObject();
     // No "after" field
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", debeziumParams.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, debeziumParams.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -672,10 +680,10 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
     params.put("log", "");
-    params.put("params", "test-params");
-    params.put("state", "SUCCESS");
+    params.put(PARAMS, "test-params");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -715,10 +723,10 @@ class LogPersistorProcessorTest {
 
     String jsonDescription = "{\"key1\":\"value1\",\"key2\":\"value2\"}";
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
     params.put("log", jsonDescription);
-    params.put("params", "");
-    params.put("state", "SUCCESS");
+    params.put(PARAMS, "");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -758,10 +766,10 @@ class LogPersistorProcessorTest {
 
     String nestedJsonDescription = "{\"outer\":\"{\\\"inner\\\":\\\"value\\\"}\"}";
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
     params.put("log", nestedJsonDescription);
-    params.put("params", "");
-    params.put("state", "SUCCESS");
+    params.put(PARAMS, "");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -801,10 +809,10 @@ class LogPersistorProcessorTest {
 
     String dateJsonDescription = "2023-10-01 12:00:00: {\"status\":\"completed\",\"result\":\"success\"}";
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
     params.put("log", dateJsonDescription);
-    params.put("params", "");
-    params.put("state", "SUCCESS");
+    params.put(PARAMS, "");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -853,10 +861,10 @@ class LogPersistorProcessorTest {
 
     String invalidJsonDescription = "{invalid json syntax}";
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
     params.put("log", invalidJsonDescription);
-    params.put("params", "");
-    params.put("state", "SUCCESS");
+    params.put(PARAMS, "");
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);
@@ -895,17 +903,17 @@ class LogPersistorProcessorTest {
     when(mockIterator.hasNext()).thenReturn(false);
 
     JSONObject after = new JSONObject();
-    after.put("assigned_user", "null");
+    after.put(ASSIGNED_USER, "null");
     after.put("updatedby", "200");
-    after.put("assigned_role", "null");
-    after.put("ad_client_id", "0");
-    after.put("ad_org_id", "0");
+    after.put(ASSIGNED_ROLE, "null");
+    after.put(AD_CLIENT_ID, "0");
+    after.put(AD_ORG_ID, "0");
     JSONObject debeziumParams = new JSONObject();
     debeziumParams.put("after", after);
     JSONObject params = new JSONObject();
-    params.put("asyncProcessId", "test-id");
-    params.put("params", debeziumParams.toString());
-    params.put("state", "SUCCESS");
+    params.put(ASYNC_PROCESS_ID, TEST_ID);
+    params.put(PARAMS, debeziumParams.toString());
+    params.put(STATE, "SUCCESS");
     MutableBoolean isStopped = new MutableBoolean(false);
 
     try (MockedStatic<OBContext> obContextMock = org.mockito.Mockito.mockStatic(OBContext.class);

@@ -10,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,7 +20,14 @@ import org.junit.jupiter.api.Test;
  * Unit tests for {@link AsyncProcessMonitor}.
  */
 class AsyncProcessMonitorTest {
+  private static final Logger log = LogManager.getLogger();
 
+  public static final String METRICS_LISTENERS = "metricsListeners";
+  public static final String TEST_ALERT_MESSAGE = "Test alert!";
+  public static final String ALERT_RULES = "alertRules";
+  public static final String ALERT_LISTENERS = "alertListeners";
+  public static final String CHECK_ALERTS = "checkAlerts";
+  public static final String BROADCAST_METRICS = "broadcastMetrics";
   private AsyncProcessMonitor monitor;
 
   @BeforeEach
@@ -118,19 +127,19 @@ class AsyncProcessMonitorTest {
 
   /**
    * Tests that metrics listeners are notified via the scheduler.
-   * Uses Thread.sleep for scheduling; in production, use Awaitility or similar.
+   * Uses CountDownLatch for deterministic waiting instead of Thread.sleep.
    */
   @Test
   void testMetricsListenerNotification() throws Exception {
-    AtomicBoolean notified = new AtomicBoolean(false);
-    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField("metricsListeners");
+    java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField(METRICS_LISTENERS);
     metricsListenersField.setAccessible(true);
     List<AsyncProcessMonitor.MetricsListener> metricsListeners = (List<AsyncProcessMonitor.MetricsListener>) metricsListenersField.get(
         monitor);
-    metricsListeners.add(snapshot -> notified.set(true));
+    metricsListeners.add(snapshot -> latch.countDown());
     monitor.start();
-    Thread.sleep(300); // Wait for scheduler execution
-    assertTrue(notified.get());
+    // Wait for the listener to be notified (max 5 seconds)
+    assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS), "Metrics listener should be notified within 5 seconds");
   }
 
   /**
@@ -143,15 +152,14 @@ class AsyncProcessMonitorTest {
         "testRule",
         AsyncProcessMonitor.AlertType.HIGH_FAILURE_RATE,
         AsyncProcessMonitor.AlertSeverity.CRITICAL,
-        snap -> true,
-        "Test alert!"
+        snap -> true, TEST_ALERT_MESSAGE
     );
-    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField("alertRules");
+    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
     alertRulesField.setAccessible(true);
     List<AsyncProcessMonitor.AlertRule> alertRules = (List<AsyncProcessMonitor.AlertRule>) alertRulesField.get(monitor);
     alertRules.add(rule);
     AtomicBoolean alertTriggered = new AtomicBoolean(false);
-    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField("alertListeners");
+    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField(ALERT_LISTENERS);
     alertListenersField.setAccessible(true);
     List<AsyncProcessMonitor.AlertListener> alertListeners = (List<AsyncProcessMonitor.AlertListener>) alertListenersField.get(
         monitor);
@@ -167,7 +175,8 @@ class AsyncProcessMonitorTest {
       }
     });
     // Invoke the private checkAlerts method via reflection
-    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod("checkAlerts");
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        CHECK_ALERTS);
     checkAlertsMethod.setAccessible(true);
     checkAlertsMethod.invoke(monitor);
     assertTrue(alertTriggered.get());
@@ -193,27 +202,47 @@ class AsyncProcessMonitorTest {
    * Tests adding and removing a metrics listener.
    */
   @Test
-  void testAddRemoveMetricsListener() {
+  void testAddRemoveMetricsListener() throws Exception {
     AsyncProcessMonitor.MetricsListener listener = snapshot -> {
     };
+
+    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField(METRICS_LISTENERS);
+    metricsListenersField.setAccessible(true);
+    List<AsyncProcessMonitor.MetricsListener> metricsListeners = (List<AsyncProcessMonitor.MetricsListener>) metricsListenersField.get(monitor);
+
+    int initialSize = metricsListeners.size();
     monitor.addMetricsListener(listener);
+    assertEquals(initialSize + 1, metricsListeners.size(), "Listener should be added");
+
     monitor.removeMetricsListener(listener);
+    assertEquals(initialSize, metricsListeners.size(), "Listener should be removed");
   }
 
   /**
    * Tests adding and removing an alert listener.
    */
   @Test
-  void testAddRemoveAlertListener() {
+  void testAddRemoveAlertListener() throws Exception {
     AsyncProcessMonitor.AlertListener listener = new AsyncProcessMonitor.AlertListener() {
       public void onAlert(AsyncProcessMonitor.Alert alert) {
+        log.info("Alert received: {}", alert.getMessage());
       }
 
       public void onAlertResolved(AsyncProcessMonitor.Alert alert) {
+        log.info("Alert resolved: {}", alert.getMessage());
       }
     };
+
+    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField(ALERT_LISTENERS);
+    alertListenersField.setAccessible(true);
+    List<AsyncProcessMonitor.AlertListener> alertListeners = (List<AsyncProcessMonitor.AlertListener>) alertListenersField.get(monitor);
+
+    int initialSize = alertListeners.size();
     monitor.addAlertListener(listener);
+    assertEquals(initialSize + 1, alertListeners.size(), "Alert listener should be added");
+
     monitor.removeAlertListener(listener);
+    assertEquals(initialSize, alertListeners.size(), "Alert listener should be removed");
   }
 
   /**
@@ -222,7 +251,7 @@ class AsyncProcessMonitorTest {
   @Test
   void testSnapshotViaBroadcastMetrics() throws Exception {
     AtomicBoolean notified = new AtomicBoolean(false);
-    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField("metricsListeners");
+    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField(METRICS_LISTENERS);
     metricsListenersField.setAccessible(true);
     List<AsyncProcessMonitor.MetricsListener> metricsListeners = (List<AsyncProcessMonitor.MetricsListener>) metricsListenersField.get(
         monitor);
@@ -233,7 +262,8 @@ class AsyncProcessMonitorTest {
       assertNotNull(snapshot.getSystemMetrics());
       notified.set(true);
     });
-    java.lang.reflect.Method broadcastMetricsMethod = AsyncProcessMonitor.class.getDeclaredMethod("broadcastMetrics");
+    java.lang.reflect.Method broadcastMetricsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        BROADCAST_METRICS);
     broadcastMetricsMethod.setAccessible(true);
     broadcastMetricsMethod.invoke(monitor);
     assertTrue(notified.get());
@@ -245,22 +275,38 @@ class AsyncProcessMonitorTest {
   @Test
   void testNoListenersNoRulesSafe() throws Exception {
     // Clear listeners and rules
-    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField("alertRules");
+    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
     alertRulesField.setAccessible(true);
-    ((List<?>) alertRulesField.get(monitor)).clear();
-    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField("alertListeners");
+    List<?> alertRules = (List<?>) alertRulesField.get(monitor);
+    alertRules.clear();
+
+    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField(ALERT_LISTENERS);
     alertListenersField.setAccessible(true);
-    ((List<?>) alertListenersField.get(monitor)).clear();
-    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField("metricsListeners");
+    List<?> alertListeners = (List<?>) alertListenersField.get(monitor);
+    alertListeners.clear();
+
+    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField(METRICS_LISTENERS);
     metricsListenersField.setAccessible(true);
-    ((List<?>) metricsListenersField.get(monitor)).clear();
+    List<?> metricsListeners = (List<?>) metricsListenersField.get(monitor);
+    metricsListeners.clear();
+
+    // Verify lists are empty
+    assertTrue(alertRules.isEmpty(), "Alert rules should be empty");
+    assertTrue(alertListeners.isEmpty(), "Alert listeners should be empty");
+    assertTrue(metricsListeners.isEmpty(), "Metrics listeners should be empty");
+
     // Should not throw exception when executing checkAlerts or broadcastMetrics
-    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod("checkAlerts");
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        CHECK_ALERTS);
     checkAlertsMethod.setAccessible(true);
     checkAlertsMethod.invoke(monitor);
-    java.lang.reflect.Method broadcastMetricsMethod = AsyncProcessMonitor.class.getDeclaredMethod("broadcastMetrics");
+    java.lang.reflect.Method broadcastMetricsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        BROADCAST_METRICS);
     broadcastMetricsMethod.setAccessible(true);
     broadcastMetricsMethod.invoke(monitor);
+
+    // If we reach here without exception, the test passes
+    assertTrue(true, "Methods executed without throwing exceptions");
   }
 
   /**
@@ -277,13 +323,13 @@ class AsyncProcessMonitorTest {
         snap -> trigger.get(),
         "Toggle alert!"
     );
-    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField("alertRules");
+    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
     alertRulesField.setAccessible(true);
     List<AsyncProcessMonitor.AlertRule> alertRules = (List<AsyncProcessMonitor.AlertRule>) alertRulesField.get(monitor);
     alertRules.add(rule);
     AtomicBoolean alertTriggered = new AtomicBoolean(false);
     AtomicBoolean alertResolved = new AtomicBoolean(false);
-    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField("alertListeners");
+    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField(ALERT_LISTENERS);
     alertListenersField.setAccessible(true);
     List<AsyncProcessMonitor.AlertListener> alertListeners = (List<AsyncProcessMonitor.AlertListener>) alertListenersField.get(
         monitor);
@@ -299,7 +345,8 @@ class AsyncProcessMonitorTest {
       }
     });
     // Trigger alert
-    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod("checkAlerts");
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        CHECK_ALERTS);
     checkAlertsMethod.setAccessible(true);
     checkAlertsMethod.invoke(monitor);
     assertTrue(alertTriggered.get());
@@ -314,17 +361,26 @@ class AsyncProcessMonitorTest {
    */
   @Test
   void testMetricsListenerExceptionIsCaught() throws Exception {
-    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField("metricsListeners");
+    Field metricsListenersField = AsyncProcessMonitor.class.getDeclaredField(METRICS_LISTENERS);
     metricsListenersField.setAccessible(true);
     List<AsyncProcessMonitor.MetricsListener> metricsListeners = (List<AsyncProcessMonitor.MetricsListener>) metricsListenersField.get(
         monitor);
     metricsListeners.add(snapshot -> {
       throw new RuntimeException("fail");
     });
-    java.lang.reflect.Method broadcastMetricsMethod = AsyncProcessMonitor.class.getDeclaredMethod("broadcastMetrics");
+    java.lang.reflect.Method broadcastMetricsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        BROADCAST_METRICS);
     broadcastMetricsMethod.setAccessible(true);
+
     // Should not throw exception outside the method
-    broadcastMetricsMethod.invoke(monitor);
+    try {
+      broadcastMetricsMethod.invoke(monitor);
+      // If we reach here, the exception was caught and handled properly
+      assertTrue(true, "Exception was caught and handled properly");
+    } catch (Exception e) {
+      // If an exception propagates, the test should fail
+      assertTrue(false, "Exception should have been caught but was propagated: " + e.getMessage());
+    }
   }
 
   /**
@@ -336,14 +392,13 @@ class AsyncProcessMonitorTest {
         "exRule",
         AsyncProcessMonitor.AlertType.HIGH_FAILURE_RATE,
         AsyncProcessMonitor.AlertSeverity.CRITICAL,
-        snap -> true,
-        "Test alert!"
+        snap -> true, TEST_ALERT_MESSAGE
     );
-    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField("alertRules");
+    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
     alertRulesField.setAccessible(true);
     List<AsyncProcessMonitor.AlertRule> alertRules = (List<AsyncProcessMonitor.AlertRule>) alertRulesField.get(monitor);
     alertRules.add(rule);
-    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField("alertListeners");
+    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField(ALERT_LISTENERS);
     alertListenersField.setAccessible(true);
     List<AsyncProcessMonitor.AlertListener> alertListeners = (List<AsyncProcessMonitor.AlertListener>) alertListenersField.get(
         monitor);
@@ -353,12 +408,22 @@ class AsyncProcessMonitorTest {
       }
 
       public void onAlertResolved(AsyncProcessMonitor.Alert alert) {
+        log.info("Alert resolved: {}", alert.getMessage());
       }
     });
-    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod("checkAlerts");
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        CHECK_ALERTS);
     checkAlertsMethod.setAccessible(true);
+
     // Should not throw exception outside the method
-    checkAlertsMethod.invoke(monitor);
+    try {
+      checkAlertsMethod.invoke(monitor);
+      // If we reach here, the exception was caught and handled properly
+      assertTrue(true, "Alert listener exception was caught and handled properly");
+    } catch (Exception e) {
+      // If an exception propagates, the test should fail
+      assertTrue(false, "Alert listener exception should have been caught but was propagated: " + e.getMessage());
+    }
   }
 
   /**
@@ -372,17 +437,25 @@ class AsyncProcessMonitorTest {
         AsyncProcessMonitor.AlertSeverity.CRITICAL,
         snap -> {
           throw new RuntimeException("fail");
-        },
-        "Test alert!"
+        }, TEST_ALERT_MESSAGE
     );
-    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField("alertRules");
+    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
     alertRulesField.setAccessible(true);
     List<AsyncProcessMonitor.AlertRule> alertRules = (List<AsyncProcessMonitor.AlertRule>) alertRulesField.get(monitor);
     alertRules.add(rule);
-    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod("checkAlerts");
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(
+        CHECK_ALERTS);
     checkAlertsMethod.setAccessible(true);
+
     // Should not throw exception outside the method
-    checkAlertsMethod.invoke(monitor);
+    try {
+      checkAlertsMethod.invoke(monitor);
+      // If we reach here, the exception was caught and handled properly
+      assertTrue(true, "Alert rule predicate exception was caught and handled properly");
+    } catch (Exception e) {
+      // If an exception propagates, the test should fail
+      assertTrue(false, "Alert rule predicate exception should have been caught but was propagated: " + e.getMessage());
+    }
   }
 
   /**
@@ -401,6 +474,16 @@ class AsyncProcessMonitorTest {
       }
     };
     monitoringSchedulerField.set(monitor, mockScheduler);
+
+    // Clear the interrupted status before the test
+    Thread.interrupted();
+
     monitor.stop(); // Should cover the InterruptedException catch
+
+    // Verify that the scheduler is shut down
+    assertTrue(mockScheduler.isShutdown(), "Scheduler should be shut down");
+
+    // Verify that the interrupted status is restored
+    assertTrue(Thread.currentThread().isInterrupted(), "Thread interrupted status should be restored");
   }
 }

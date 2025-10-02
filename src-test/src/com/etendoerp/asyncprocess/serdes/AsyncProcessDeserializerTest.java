@@ -25,13 +25,15 @@ import com.etendoerp.asyncprocess.model.AsyncProcessState;
  */
 class AsyncProcessDeserializerTest {
 
+  public static final String TOPIC = "topic";
+
   /**
    * Tests that deserializing a null byte array returns null.
    */
   @Test
   void testDeserializeNullReturnsNull() {
     Deserializer<AsyncProcess> deserializer = new AsyncProcessDeserializer();
-    assertNull(deserializer.deserialize("topic", null));
+    assertNull(deserializer.deserialize(TOPIC, null));
   }
 
   /**
@@ -50,7 +52,7 @@ class AsyncProcessDeserializerTest {
         "\"state\":\"WAITING\"}";
     byte[] data = json.getBytes(StandardCharsets.UTF_8);
     Deserializer<AsyncProcess> deserializer = new AsyncProcessDeserializer();
-    AsyncProcess process = deserializer.deserialize("topic", data);
+    AsyncProcess process = deserializer.deserialize(TOPIC, data);
     assertNotNull(process);
     assertEquals("p1", process.getId());
     assertEquals("desc", process.getDescription());
@@ -82,7 +84,7 @@ class AsyncProcessDeserializerTest {
     String invalidJson = "{not valid json}";
     byte[] data = invalidJson.getBytes(StandardCharsets.UTF_8);
     Deserializer<AsyncProcess> deserializer = new AsyncProcessDeserializer();
-    assertThrows(SerializationException.class, () -> deserializer.deserialize("topic", data));
+    assertThrows(SerializationException.class, () -> deserializer.deserialize(TOPIC, data));
   }
 
   /**

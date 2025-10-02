@@ -2,9 +2,7 @@ package com.etendoerp.asyncprocess.startup;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -13,15 +11,9 @@ import static org.mockito.Mockito.when;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
-import java.util.regex.Pattern;
 
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewPartitions;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,9 +30,7 @@ import org.openbravo.base.session.OBPropertiesProvider;
 import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
 import com.etendoerp.asyncprocess.model.AsyncProcessExecution;
 
-import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.sender.KafkaSender;
-import reactor.kafka.sender.SenderOptions;
 
 /**
  * Unit tests for the {@link KafkaClientManager} class.
@@ -55,6 +45,7 @@ public class KafkaClientManagerTest {
   private static final String TEST_KAFKA_HOST = "localhost:9092";
   private static final String TEST_TOPIC = "test-topic";
   private static final String TEST_GROUP_ID = "test-group";
+  public static final String KAFKA_TOPIC_PARTITIONS = "kafka.topic.partitions";
 
   @Mock
   private AdminClient mockAdminClient;
@@ -131,7 +122,7 @@ public class KafkaClientManagerTest {
   }
 
   @Test
-  void testExistsOrCreateTopic() throws Exception {
+  void testExistsOrCreateTopic() {
     when(mockAdminClient.listTopics()).thenReturn(mock(org.apache.kafka.clients.admin.ListTopicsResult.class));
     when(mockAdminClient.listTopics().names()).thenReturn(KafkaFuture.completedFuture(Collections.emptySet()));
     when(mockAdminClient.describeTopics(any())).thenReturn(mock(org.apache.kafka.clients.admin.DescribeTopicsResult.class));
@@ -143,7 +134,7 @@ public class KafkaClientManagerTest {
   }
 
   @Test
-  void testExistsOrCreateTopicIncreasePartitions() throws Exception {
+  void testExistsOrCreateTopicIncreasePartitions() {
     var mockTopicDescription = mock(org.apache.kafka.clients.admin.TopicDescription.class);
     when(mockTopicDescription.partitions()).thenReturn(java.util.Arrays.asList(
         mock(org.apache.kafka.common.TopicPartitionInfo.class),
@@ -184,15 +175,15 @@ public class KafkaClientManagerTest {
 
   @Test
   void testGetNumPartitionsCustom() {
-    when(mockProperties.containsKey("kafka.topic.partitions")).thenReturn(true);
-    when(mockProperties.getProperty("kafka.topic.partitions")).thenReturn("10");
+    when(mockProperties.containsKey(KAFKA_TOPIC_PARTITIONS)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_TOPIC_PARTITIONS)).thenReturn("10");
     int partitions = manager.getNumPartitions();
     assertEquals(10, partitions);
   }
 
   @Test
   void testGetNumPartitionsInvalid() {
-    when(mockProperties.getProperty("kafka.topic.partitions")).thenReturn("invalid");
+    when(mockProperties.getProperty(KAFKA_TOPIC_PARTITIONS)).thenReturn("invalid");
     int partitions = manager.getNumPartitions();
     assertEquals(5, partitions); // Default
   }

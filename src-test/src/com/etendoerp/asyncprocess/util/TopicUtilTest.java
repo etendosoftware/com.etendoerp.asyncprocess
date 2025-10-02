@@ -22,6 +22,7 @@ import com.smf.jobs.model.Job;
 @RunWith(MockitoJUnitRunner.class)
 public class TopicUtilTest {
 
+  public static final String TEST_JOB = "Test Job";
   @Mock
   private Job mockJob;
 
@@ -37,7 +38,7 @@ public class TopicUtilTest {
   @Test
   public void testCreateTopicWithLongSubtopic() {
     // Arrange
-    when(mockJob.getName()).thenReturn("Test Job");
+    when(mockJob.getName()).thenReturn(TEST_JOB);
     Long subtopic = 12345L;
 
     // Act
@@ -59,7 +60,7 @@ public class TopicUtilTest {
   @Test
   public void testCreateTopicWithStringSubtopic() {
     // Arrange
-    when(mockJob.getName()).thenReturn("Test Job");
+    when(mockJob.getName()).thenReturn(TEST_JOB);
     String subtopic = "process-data";
 
     // Act
@@ -110,7 +111,7 @@ public class TopicUtilTest {
   @Test
   public void testCreateTopicWithEmptySubtopic() {
     // Arrange
-    when(mockJob.getName()).thenReturn("Test Job");
+    when(mockJob.getName()).thenReturn(TEST_JOB);
     String subtopic = "";
 
     // Act
@@ -228,6 +229,7 @@ public class TopicUtilTest {
    * Tests the private constructor for code coverage.
    * This test ensures 100% line coverage by invoking the private constructor
    * using reflection, which is a common practice for utility classes.
+   * @throws Exception if reflection fails
    */
   @Test
   public void testPrivateConstructor() throws Exception {

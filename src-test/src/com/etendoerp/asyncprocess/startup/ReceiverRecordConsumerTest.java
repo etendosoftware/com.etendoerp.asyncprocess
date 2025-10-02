@@ -85,6 +85,12 @@ class ReceiverRecordConsumerTest {
   private static final String TEST_KEY = "test-key";
   private static final String TEST_USER_ID = "test-user-id";
   private static final String TEST_ROLE_ID = "test-role-id";
+  public static final String SETUP_CONTEXT_FROM_PARAMS = "setupContextFromParams";
+  public static final String JSON_CONTEXT_PARAMS = "{\"context\":{\"user\":\"param-user\",\"role\":\"param-role\",\"client\":\"param-client\",\"organization\":\"param-org\"}}";
+  public static final String PARAM_ROLE = "param-role";
+  public static final String PARAM_CLIENT = "param-client";
+  public static final String PARAM_ORG = "param-org";
+  public static final String PARAM_USER = "param-user";
 
   // Mocks
   @Mock
@@ -953,7 +959,7 @@ class ReceiverRecordConsumerTest {
     when(mockOBContext.getUser()).thenReturn(mockUser);
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
@@ -972,7 +978,7 @@ class ReceiverRecordConsumerTest {
     // Mock no existing context
     mockedOBContext.when(OBContext::getOBContext).thenReturn(null);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
@@ -987,18 +993,19 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsWithParamsNoExistingUser() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", "{\"context\":{\"user\":\"param-user\",\"role\":\"param-role\",\"client\":\"param-client\",\"organization\":\"param-org\"}}");
+    params.put("params", JSON_CONTEXT_PARAMS);
 
     // Mock no existing user
     when(mockOBContext.getUser()).thenReturn(null);
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
     // Should set context from params
-    mockedOBContext.verify(() -> OBContext.setOBContext("param-user", "param-role", "param-client", "param-org"), times(1));
+    mockedOBContext.verify(() -> OBContext.setOBContext(PARAM_USER, PARAM_ROLE, PARAM_CLIENT,
+        PARAM_ORG), times(1));
   }
 
   /**
@@ -1008,7 +1015,7 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsWithParamsExistingUser() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", "{\"context\":{\"user\":\"param-user\",\"role\":\"param-role\",\"client\":\"param-client\",\"organization\":\"param-org\"}}");
+    params.put("params", JSON_CONTEXT_PARAMS);
 
     // Mock existing user and context
     when(mockOBContext.getUser()).thenReturn(mockUser);
@@ -1021,12 +1028,13 @@ class ReceiverRecordConsumerTest {
     when(mockOrganization.getId()).thenReturn("existing-org");
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
     // Should use params context, not existing context
-    mockedOBContext.verify(() -> OBContext.setOBContext("param-user", "param-role", "param-client", "param-org"), times(1));
+    mockedOBContext.verify(() -> OBContext.setOBContext(PARAM_USER, PARAM_ROLE, PARAM_CLIENT,
+        PARAM_ORG), times(1));
   }
 
   /**
@@ -1049,7 +1057,7 @@ class ReceiverRecordConsumerTest {
     when(mockOrganization.getId()).thenReturn("existing-org");
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
@@ -1064,18 +1072,18 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsWithParamsAndAfter() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", "{\"context\":{\"user\":\"param-user\",\"role\":\"param-role\",\"client\":\"param-client\",\"organization\":\"param-org\"}}");
+    params.put("params", JSON_CONTEXT_PARAMS);
     params.put("after", "{\"updatedby\":\"after-user\",\"ad_client_id\":\"after-client\",\"ad_org_id\":\"after-org\"}");
 
     // Mock existing user
     when(mockOBContext.getUser()).thenReturn(mockUser);
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
-    mockedOBContext.verify(() -> OBContext.setOBContext("after-user", "param-role", "after-client", "after-org"), times(1));
+    mockedOBContext.verify(() -> OBContext.setOBContext("after-user", PARAM_ROLE, "after-client", "after-org"), times(1));
   }
 
   /**
@@ -1091,7 +1099,7 @@ class ReceiverRecordConsumerTest {
     when(mockOBContext.getUser()).thenReturn(mockUser);
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 
@@ -1112,7 +1120,7 @@ class ReceiverRecordConsumerTest {
     when(mockOBContext.getUser()).thenReturn(mockUser);
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
-    Method method = ReceiverRecordConsumer.class.getDeclaredMethod("setupContextFromParams", JSONObject.class);
+    Method method = ReceiverRecordConsumer.class.getDeclaredMethod(SETUP_CONTEXT_FROM_PARAMS, JSONObject.class);
     method.setAccessible(true);
     method.invoke(consumerWithoutRetry, params);
 

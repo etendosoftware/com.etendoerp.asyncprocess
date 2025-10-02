@@ -32,6 +32,7 @@ import org.junit.jupiter.api.Test;
  */
 class KafkaCircuitBreakerTest {
 
+  public static final String TEST_BREAKER = "testBreaker";
   private KafkaCircuitBreaker breaker;
 
   /**
@@ -39,7 +40,7 @@ class KafkaCircuitBreakerTest {
    */
   @BeforeEach
   void setUp() {
-    breaker = new KafkaCircuitBreaker("testBreaker");
+    breaker = new KafkaCircuitBreaker(TEST_BREAKER);
   }
 
   /**
@@ -55,7 +56,7 @@ class KafkaCircuitBreakerTest {
    */
   @Test
   void testDefaultConfigAndGetters() {
-    assertEquals("testBreaker", breaker.getName());
+    assertEquals(TEST_BREAKER, breaker.getName());
     assertNotNull(breaker.getConfig());
     assertEquals(KafkaCircuitBreaker.State.CLOSED, breaker.getState());
     assertNotNull(breaker.getMetrics());
@@ -123,7 +124,7 @@ class KafkaCircuitBreakerTest {
   void testOpenStateBlocksExecution() {
     KafkaCircuitBreaker.CircuitBreakerConfig config = new KafkaCircuitBreaker.CircuitBreakerConfig(
         5, Duration.ofSeconds(60), Duration.ofSeconds(60), 5000, 50, 10);
-    KafkaCircuitBreaker longBreaker = new KafkaCircuitBreaker("testBreaker", config);
+    KafkaCircuitBreaker longBreaker = new KafkaCircuitBreaker(TEST_BREAKER, config);
     try {
       // Trigger a failure to update lastFailureTime
       assertThrows(RuntimeException.class, () -> longBreaker.execute(() -> {
