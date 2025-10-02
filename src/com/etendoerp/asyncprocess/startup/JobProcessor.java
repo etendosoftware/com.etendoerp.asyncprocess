@@ -343,43 +343,35 @@ public class JobProcessor {
   /**
    * Pre-loads action suppliers in the main context.
    */
-  private Map<String, Supplier<Action>> preloadActionSuppliers() {
+  protected Map<String, Supplier<Action>> preloadActionSuppliers() {
     final Map<String, Supplier<Action>> actionSuppliers = new HashMap<>();
-    try {
-      OBContext.setOBContext("100", "0", "0", "0");
-      List<Job> jobs = loadAsyncJobs();
-      log.info("Pre-loading action suppliers for {} jobs...", jobs.size());
-      for (Job job : jobs) {
-        for (JobLine jobLine : job.getJOBSJobLineList()) {
-          try {
-            Supplier<Action> supplier = createActionFactory(jobLine.getAction());
-            actionSuppliers.put(jobLine.getId(), supplier);
-          } catch (ClassNotFoundException e) {
-            log.error("CRITICAL: Could not load class for job line {}. This job will not work.",
-                jobLine.getId(), e);
-            throw new OBException("Failed to pre-load action class", e);
-          }
+    OBContext.setOBContext("100", "0", "0", "0");
+    List<Job> jobs = loadAsyncJobs();
+    log.info("Pre-loading action suppliers for {} jobs...", jobs.size());
+    for (Job job : jobs) {
+      for (JobLine jobLine : job.getJOBSJobLineList()) {
+        try {
+          Supplier<Action> supplier = createActionFactory(jobLine.getAction());
+          actionSuppliers.put(jobLine.getId(), supplier);
+        } catch (ClassNotFoundException e) {
+          log.error("CRITICAL: Could not load class for job line {}. This job will not work.",
+              jobLine.getId(), e);
+          throw new OBException("Failed to pre-load action class", e);
         }
       }
-      log.info("Successfully pre-loaded {} action suppliers.", actionSuppliers.size());
-    } finally {
-      OBContext.restorePreviousMode();
     }
+    log.info("Successfully pre-loaded {} action suppliers.", actionSuppliers.size());
     return actionSuppliers;
   }
 
   /**
    * Loads the list of asynchronous jobs from the database.
    */
-  private List<Job> loadAsyncJobs() {
-    try {
-      OBContext.setOBContext("100", "0", "0", "0");
-      var critJob = OBDal.getInstance().createCriteria(Job.class);
-      critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
-      return critJob.list();
-    } finally {
-      OBContext.restorePreviousMode();
-    }
+  protected List<Job> loadAsyncJobs() {
+    OBContext.setOBContext("100", "0", "0", "0");
+    var critJob = OBDal.getInstance().createCriteria(Job.class);
+    critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
+    return critJob.list();
   }
 
   private void handleJobProcessingError(Throwable error) {

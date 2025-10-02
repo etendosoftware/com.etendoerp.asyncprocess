@@ -5,6 +5,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
+import org.openbravo.base.exception.OBException;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
 import org.openbravo.model.ad.access.Role;
@@ -17,16 +18,27 @@ import com.smf.jobs.Result;
 
 public class AlertProcess extends Action {
   private static final Logger log = LogManager.getLogger();
+  public static final String AFTER = "after";
 
   @Override
   protected ActionResult action(JSONObject parameters, MutableBoolean isStopped) {
     log.info("{}", parameters);
     ActionResult actionResult = new ActionResult();
     try {
+      if (!parameters.has(AFTER)) {
+        actionResult.setType(Result.Type.ERROR);
+        actionResult.setMessage("Missing 'after' parameter");
+        return actionResult;
+      }
+      if (!parameters.getJSONObject(AFTER).has("documentno")) {
+        actionResult.setType(Result.Type.ERROR);
+        actionResult.setMessage("Missing 'documentno' parameter");
+        return actionResult;
+      }
       OBContext.setOBContext("100", "42D0EEB1C66F497A90DD526DC597E6F0", "23C59575B9CF467C9620760EB255B389", "0");
       Alert alert = new Alert();
       Role role = OBContext.getOBContext().getRole();
-      alert.setDescription("Document No: " + parameters.getJSONObject("after").getString("documentno"));
+      alert.setDescription("Document No: " + parameters.getJSONObject(AFTER).getString("documentno"));
       alert.setAlertRule(OBDal.getInstance().get(AlertRule.class, "57CC65EA1D9C47E9BA20E09771004802"));
       alert.setReferenceSearchKey("");
       alert.setRole(role);
@@ -35,7 +47,7 @@ public class AlertProcess extends Action {
       OBDal.getInstance().commitAndClose();
       actionResult.setType(Result.Type.SUCCESS);
       actionResult.setMessage("Alert created");
-    } catch (JSONException e) {
+    } catch (JSONException | OBException e) {
       log.error("AlertProcess exception", e);
       actionResult.setType(Result.Type.ERROR);
       actionResult.setMessage(e.getMessage());

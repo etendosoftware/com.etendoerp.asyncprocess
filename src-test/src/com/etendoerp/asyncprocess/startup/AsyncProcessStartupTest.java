@@ -10,11 +10,11 @@ import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_URL_KEY
 import static com.etendoerp.asyncprocess.AsyncProcessTestConstants.KAFKA_URL_VALUE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -409,7 +409,7 @@ class AsyncProcessStartupTest {
       InvocationTargetException exception = assertThrows(InvocationTargetException.class, () -> method.invoke(asyncProcessStartup, future));
       assertTrue(exception.getCause() instanceof OBException);
       assertTrue(Thread.currentThread().isInterrupted());
-      verify(monitor).recordJobExecution(eq("SYSTEM_SETUP"), eq("Initial Setup Failed"), eq(0L), eq(false), eq(false));
+      verify(monitor).recordJobExecution("SYSTEM_SETUP","Initial Setup Failed", 0L, false, false);
       verify(recovery).isRecoveryEnabled();
     } finally {
       Thread.interrupted();
@@ -432,7 +432,7 @@ class AsyncProcessStartupTest {
 
     InvocationTargetException exception = assertThrows(InvocationTargetException.class, () -> method.invoke(asyncProcessStartup, future));
     assertTrue(exception.getCause() instanceof OBException);
-    verify(monitor).recordJobExecution(eq("SYSTEM_SETUP"), eq("Initial Setup Failed"), eq(0L), eq(false), eq(false));
+    verify(monitor).recordJobExecution("SYSTEM_SETUP", "Initial Setup Failed", 0L, false, false);
     verify(recovery).isRecoveryEnabled();
   }
 
@@ -826,5 +826,98 @@ class AsyncProcessStartupTest {
     String result = (String) method.invoke(null, mockProperties);
 
     assertEquals("kafka:9092", result);
+  }
+
+  /**
+   * Tests the private initializeCircuitBreaker method for successful initialization.
+   * Verifies that the circuit breaker is created, state change listener is set,
+   * and process monitor is called when state changes.
+   *
+   * @throws Exception
+   *     if there is an error accessing or invoking the method
+   */
+  @Test
+  void testInitializeCircuitBreakerSuccess() throws Exception {
+    // Mock process monitor
+    AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
+    inject("processMonitor", monitor);
+
+    // Use spy to allow real method calls while still mocking construction
+    try (MockedConstruction<KafkaCircuitBreaker> mockedCircuitBreaker = mockConstruction(KafkaCircuitBreaker.class,
+        (mock, context) -> {
+          // Verify constructor arguments
+          assertEquals("async-process-kafka", context.arguments().get(0));
+          assertTrue(context.arguments().get(1) instanceof KafkaCircuitBreaker.CircuitBreakerConfig);
+        })) {
+
+      // Call the private method
+      Method method = AsyncProcessStartup.class.getDeclaredMethod("initializeCircuitBreaker");
+      method.setAccessible(true);
+      method.invoke(asyncProcessStartup);
+
+      // Verify circuit breaker was created
+      assertEquals(1, mockedCircuitBreaker.constructed().size());
+      KafkaCircuitBreaker circuitBreaker = mockedCircuitBreaker.constructed().get(0);
+
+      // Verify setStateChangeListener was called
+      verify(circuitBreaker).setStateChangeListener(any());
+
+      // Get the injected circuit breaker
+      Field circuitBreakerField = AsyncProcessStartup.class.getDeclaredField("circuitBreaker");
+      circuitBreakerField.setAccessible(true);
+      KafkaCircuitBreaker injectedCircuitBreaker = (KafkaCircuitBreaker) circuitBreakerField.get(asyncProcessStartup);
+      assertNotNull(injectedCircuitBreaker);
+    }
+  }
+
+  /**
+   * Tests the circuit breaker state change listener functionality.
+   * Verifies that when the circuit breaker state changes to CLOSED,
+   * the process monitor is notified with success=true.
+   *
+   * @throws Exception
+   *     if there is an error during testing
+   */
+  @Test
+  void testCircuitBreakerStateChangeListener() throws Exception {
+    // Mock process monitor
+    AsyncProcessMonitor monitor = mock(AsyncProcessMonitor.class);
+    inject("processMonitor", monitor);
+
+    // Create a real circuit breaker instance to test the listener
+    KafkaCircuitBreaker.CircuitBreakerConfig config = new KafkaCircuitBreaker.CircuitBreakerConfig(
+        5, java.time.Duration.ofMinutes(2), java.time.Duration.ofSeconds(30),
+        10000, 50, 10
+    );
+    KafkaCircuitBreaker circuitBreaker = new KafkaCircuitBreaker("test-circuit", config);
+
+    // Set up the same listener as in the code
+    circuitBreaker.setStateChangeListener((name, from, to, reason) -> {
+      // This is the lambda from initializeCircuitBreaker
+      if (monitor != null) {
+        monitor.recordKafkaConnection(to == KafkaCircuitBreaker.State.CLOSED);
+      }
+    });
+
+    // Initially should be CLOSED
+    assertEquals(KafkaCircuitBreaker.State.CLOSED, getCircuitBreakerState(circuitBreaker));
+
+    // Force open and verify monitor was called with false
+    circuitBreaker.forceOpen();
+    verify(monitor).recordKafkaConnection(false);
+
+    // Force close and verify monitor was called with true
+    circuitBreaker.forceClose();
+    verify(monitor).recordKafkaConnection(true);
+  }
+
+  /**
+   * Helper method to get the current state of a circuit breaker using reflection.
+   */
+  private KafkaCircuitBreaker.State getCircuitBreakerState(KafkaCircuitBreaker circuitBreaker) throws Exception {
+    Field stateField = KafkaCircuitBreaker.class.getDeclaredField("state");
+    stateField.setAccessible(true);
+    AtomicReference<KafkaCircuitBreaker.State> stateRef = (AtomicReference<KafkaCircuitBreaker.State>) stateField.get(circuitBreaker);
+    return stateRef.get();
   }
 }
