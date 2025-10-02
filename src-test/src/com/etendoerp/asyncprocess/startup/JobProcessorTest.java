@@ -2,12 +2,14 @@ package com.etendoerp.asyncprocess.startup;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
@@ -83,8 +85,6 @@ class JobProcessorTest {
   public static final String TEST_JOBLINE_ID_0 = "test-jobline-id-0";
   public static final String CREATE_ACTION_FACTORY = "createActionFactory";
   public static final String ACTION_CLASS = "com.smf.jobs.Action";
-  public static final String GET_JOB_PARALLEL_THREADS = "getJobParallelThreads";
-  public static final String CONVERT_STATE = "convertState";
 
   @Mock private AsyncProcessMonitor processMonitor;
   @Mock private ConsumerRecoveryManager recoveryManager;
@@ -161,25 +161,25 @@ class JobProcessorTest {
   }
 
   @Test
-  void testGetJobParallelThreads() {
+  void testGetJobParallelThreads() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     when(job.getId()).thenReturn("job1");
 
     // Test case 1: Valid number
     when(job.get(ETAP_PARALLEL_THREADS)).thenReturn("4");
-    assertEquals(4, (int) invokePrivateMethod(jobProcessor, GET_JOB_PARALLEL_THREADS, new Class<?>[]{com.smf.jobs.model.Job.class}, job));
+    assertEquals(4, (int) invokePrivateMethod(jobProcessor, "getJobParallelThreads", new Class<?>[]{com.smf.jobs.model.Job.class}, job));
 
     // Test case 2: Null value
     when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(null);
-    assertEquals(8, (int) invokePrivateMethod(jobProcessor, GET_JOB_PARALLEL_THREADS, new Class<?>[]{com.smf.jobs.model.Job.class}, job));
+    assertEquals(8, (int) invokePrivateMethod(jobProcessor, "getJobParallelThreads", new Class<?>[]{com.smf.jobs.model.Job.class}, job));
 
     // Test case 3: Not a number
     when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(NOTANUMBER);
-    assertEquals(8, (int) invokePrivateMethod(jobProcessor, GET_JOB_PARALLEL_THREADS, new Class<?>[]{com.smf.jobs.model.Job.class}, job));
+    assertEquals(8, (int) invokePrivateMethod(jobProcessor, "getJobParallelThreads", new Class<?>[]{com.smf.jobs.model.Job.class}, job));
   }
 
   @Test
-  void testGetJobLineConfigWithValidValues() {
+  void testGetJobLineConfig_withValidValues() throws Exception {
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(jobLine.get(ETAP_MAX_RETRIES)).thenReturn("5");
     when(jobLine.get(ETAP_RETRY_DELAY_MS)).thenReturn("2000");
@@ -192,7 +192,7 @@ class JobProcessorTest {
   }
 
   @Test
-  void testGetJobLineConfigWithDefaults() {
+  void testGetJobLineConfig_withDefaults() throws Exception {
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(jobLine.get(ETAP_MAX_RETRIES)).thenReturn(null);
     when(jobLine.get(ETAP_RETRY_DELAY_MS)).thenReturn(NOTANUMBER);
@@ -207,7 +207,7 @@ class JobProcessorTest {
 
 
   @Test
-  void testCalculateTopics() {
+  void testCalculateTopics() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(job.getName()).thenReturn(TEST_JOB);
@@ -231,10 +231,10 @@ class JobProcessorTest {
   }
 
   @Test
-  void testConvertState() {
-    assertNotNull(invokePrivateMethod(jobProcessor, CONVERT_STATE, new Class<?>[]{String.class}, "STARTED"));
-    assertNotNull(invokePrivateMethod(jobProcessor, CONVERT_STATE, new Class<?>[]{String.class}, "INVALID"));
-    assertNotNull(invokePrivateMethod(jobProcessor, CONVERT_STATE, new Class<?>[]{String.class}, new Object[]{null}));
+  void testConvertState() throws Exception {
+    assertNotNull(invokePrivateMethod(jobProcessor, "convertState", new Class<?>[]{String.class}, "STARTED"));
+    assertNotNull(invokePrivateMethod(jobProcessor, "convertState", new Class<?>[]{String.class}, "INVALID"));
+    assertNotNull(invokePrivateMethod(jobProcessor, "convertState", new Class<?>[]{String.class}, new Object[]{null}));
   }
 
   @Test
@@ -243,7 +243,7 @@ class JobProcessorTest {
   }
 
   @Test
-  void testGetGroupId() {
+  void testGetGroupId() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     when(job.getName()).thenReturn("Test.Job_1");
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
@@ -253,7 +253,7 @@ class JobProcessorTest {
   }
 
   @Test
-  void testSetupTopicAndPartitionsAndCalculateConsumerCount() {
+  void testSetupTopicAndPartitionsAndCalculateConsumerCount() throws Exception {
     com.smf.jobs.model.Job job = mock(com.smf.jobs.model.Job.class);
     com.smf.jobs.model.JobLine jobLine = mock(com.smf.jobs.model.JobLine.class);
     when(job.isEtapConsumerPerPartition()).thenReturn(false, true);
@@ -267,7 +267,7 @@ class JobProcessorTest {
   }
 
   @Test
-  void testNewInstanceGetThrowsExceptionForInterface() throws Exception {
+  void testNewInstanceGet_throwsExceptionForInterface() throws Exception {
     Class<?> newInstanceClass = Class.forName("com.etendoerp.asyncprocess.startup.JobProcessor$NewInstance");
     Constructor<?> ctor = newInstanceClass.getDeclaredConstructor(Class.class);
     ctor.setAccessible(true);
@@ -456,14 +456,10 @@ class JobProcessorTest {
   }
 
   private static class TestSessionFactoryController extends SessionFactoryController {
-    @Override public void initialize() {
-      // No-op for testing
-    }
+    @Override public void initialize() {}
     @Override public org.hibernate.SessionFactory getSessionFactory() { return mock(org.hibernate.SessionFactory.class); }
     @Override public boolean isInitialized() { return true; }
-    @Override protected void mapModel(org.hibernate.cfg.Configuration configuration) {
-      // No-op for testing
-    }
+    @Override protected void mapModel(org.hibernate.cfg.Configuration configuration) {}
   }
 
   @Test
