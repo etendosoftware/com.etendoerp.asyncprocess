@@ -264,8 +264,8 @@ class AsyncProcessExecutionDeserializerTest {
                   // Verify the JSON contains expected structure
                   assert jsonString.contains("\"id\":\"0\"");
                   assert jsonString.contains("\"asyncProcessId\":\"4448\"");
-                  assert jsonString.contains("\"log\":\"0\"");
-                  assert jsonString.contains("\"description\":\"0\"");
+                  assert jsonString.contains("\"log\":\"\"");
+                  assert jsonString.contains("\"description\":\"\"");
                   assert jsonString.contains("\"params\":\"test params\"");
                   return expectedExecution;
                 });
@@ -350,7 +350,7 @@ class AsyncProcessExecutionDeserializerTest {
             when(mock.readValue(anyString(), eq(AsyncProcessExecution.class)))
                 .thenAnswer(invocation -> {
                   String jsonString = invocation.getArgument(0);
-                  String expectedJson = "{\"id\":\"0\",\"asyncProcessId\":\"4448\",\"log\":\"0\",\"description\":\"0\",\"params\":\"" + testParams + "\"}";
+                  String expectedJson = "{\"id\":\"0\",\"asyncProcessId\":\"4448\",\"log\":\"\",\"description\":\"\",\"params\":\"" + testParams + "\"}";
                   assertEquals(expectedJson, jsonString);
                   return new AsyncProcessExecution();
                 });

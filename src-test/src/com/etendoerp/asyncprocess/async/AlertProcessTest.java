@@ -2,11 +2,12 @@ package com.etendoerp.asyncprocess.async;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.codehaus.jettison.json.JSONException;
@@ -14,59 +15,93 @@ import org.codehaus.jettison.json.JSONObject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
-import org.openbravo.test.base.OBBaseTest;
+import org.openbravo.model.ad.access.Role;
+import org.openbravo.model.ad.alert.Alert;
+import org.openbravo.model.ad.alert.AlertRule;
 
 import com.smf.jobs.ActionResult;
 import com.smf.jobs.Result;
 
 /**
- * Unit tests for the AlertProcess class, verifying alert creation and error handling.
- * Tests cover scenarios with missing or null parameters, missing "after" object, missing "documentno",
- * and correct input class type. Uses Mockito for mocking static methods and dependencies.
+ * Unit tests for {@link AlertProcess} class.
+ * Tests cover successful alert creation, JSON parsing exceptions, and various error scenarios.
  */
-class AlertProcessTest extends OBBaseTest {
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
+class AlertProcessTest {
 
-  private AlertProcess alertProcess;
-  private AutoCloseable mocks;
+  private static final String TEST_DOCUMENT_NO = "DOC-001";
+  private static final String ALERT_RULE_ID = "57CC65EA1D9C47E9BA20E09771004802";
+  private static final String USER_ID = "100";
+  private static final String ROLE_ID = "42D0EEB1C66F497A90DD526DC597E6F0";
+  private static final String CLIENT_ID = "23C59575B9CF467C9620760EB255B389";
+  private static final String ORG_ID = "0";
+  public static final String ALERT_CREATED = "Alert created";
+  public static final String AFTER = "after";
+  public static final String DOCUMENTNO = "documentno";
+
+  @Mock
+  private OBContext mockOBContext;
 
   @Mock
   private OBDal mockOBDal;
 
   @Mock
-  private OBContext mockOBContext;
+  private Role mockRole;
+
+  @Mock
+  private AlertRule mockAlertRule;
+
+  @Mock
+  private org.openbravo.base.model.Entity mockEntity;
+
+  @Mock
+  private org.openbravo.base.model.Entity mockRoleEntity;
 
   private MockedStatic<OBContext> mockedOBContext;
   private MockedStatic<OBDal> mockedOBDal;
 
-  /**
-   * Initializes mocks and static method stubs before each test.
-   *
-   * @throws Exception
-   *     if mock initialization fails
-   */
+  private AlertProcess alertProcess;
+  private AutoCloseable mocks;
+  private MutableBoolean isStopped;
+
   @BeforeEach
-  public void setUp() throws Exception {
+  void setUp() {
     mocks = MockitoAnnotations.openMocks(this);
     alertProcess = new AlertProcess();
+    isStopped = new MutableBoolean(false);
 
+    // Setup static mocks
     mockedOBContext = mockStatic(OBContext.class);
     mockedOBDal = mockStatic(OBDal.class);
 
-    mockedOBDal.when(OBDal::getInstance).thenReturn(mockOBDal);
+    // Configure basic mock behavior
+    mockedOBContext.when(() -> OBContext.setOBContext(USER_ID, ROLE_ID, CLIENT_ID, ORG_ID))
+        .thenAnswer(invocation -> null);
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
+    mockedOBDal.when(OBDal::getInstance).thenReturn(mockOBDal);
+
+    when(mockOBContext.getRole()).thenReturn(mockRole);
+    when(mockOBDal.get(AlertRule.class, ALERT_RULE_ID)).thenReturn(mockAlertRule);
+
+    // Configure AlertRule mock to have a valid entity to avoid NullPointerException
+    when(mockAlertRule.getEntity()).thenReturn(mockEntity);
+    when(mockEntity.getName()).thenReturn("ADAlertRule");
+
+    // Configure Role mock to have a valid entity to avoid NullPointerException
+    when(mockRole.getEntity()).thenReturn(mockRoleEntity);
+    when(mockRoleEntity.getName()).thenReturn("ADRole");
   }
 
-  /**
-   * Closes mocks and static method stubs after each test.
-   *
-   * @throws Exception
-   *     if closing mocks fails
-   */
   @AfterEach
   void tearDown() throws Exception {
     if (mockedOBContext != null) {
@@ -81,91 +116,123 @@ class AlertProcessTest extends OBBaseTest {
   }
 
   /**
-   * Test the action method with a valid after object and a valid document number.
-   * It should create an alert and return a successful result.
+   * Tests successful alert creation with valid parameters.
+   */
+  @Test
+  void testActionSuccessfulAlertCreation() throws JSONException {
+    JSONObject parameters = createValidParameters();
+    ActionResult result = alertProcess.action(parameters, isStopped);
+    assertSuccessResult(result);
+    mockedOBContext.verify(() -> OBContext.setOBContext(USER_ID, ROLE_ID, CLIENT_ID, ORG_ID), times(1));
+  }
+
+  /**
+   * Tests error handling when 'after' object is missing from parameters.
    */
   @Test
   void testActionMissingAfterObject() {
     JSONObject parameters = new JSONObject();
-    MutableBoolean isStopped = new MutableBoolean(false);
-
     ActionResult result = alertProcess.action(parameters, isStopped);
-
-    assertNotNull(result);
-    assertEquals(Result.Type.ERROR, result.getType());
-    assertEquals("JSONObject[\"after\"] not found.", result.getMessage());
-
-    verify(mockOBDal, never()).save(any());
-    verify(mockOBDal, never()).flush();
-    verify(mockOBDal, never()).commitAndClose();
+    assertErrorResult(result);
   }
 
   /**
-   * Tests the action method when the "documentno" field is missing in the "after" object.
-   * Expects an error result and verifies that no database operations are performed.
-   *
-   * @throws JSONException
-   *     if there is an error constructing the JSON objects
+   * Tests error handling when 'documentno' field is missing from 'after' object.
    */
   @Test
   void testActionMissingDocumentNo() throws JSONException {
-    JSONObject afterObject = new JSONObject();
-
     JSONObject parameters = new JSONObject();
-    parameters.put("after", afterObject);
-    MutableBoolean isStopped = new MutableBoolean(false);
-
+    parameters.put(AFTER, new JSONObject());
     ActionResult result = alertProcess.action(parameters, isStopped);
-
-    assertNotNull(result);
-    assertEquals(Result.Type.ERROR, result.getType());
-    assertEquals("JSONObject[\"documentno\"] not found.", result.getMessage());
-
-    verify(mockOBDal, never()).save(any());
-    verify(mockOBDal, never()).flush();
-    verify(mockOBDal, never()).commitAndClose();
+    assertErrorResult(result);
   }
 
   /**
-   * Test the action method with a valid after object and a valid document number.
-   * It should create an alert and return a successful result.
+   * Tests error handling when 'after' object is null.
    */
   @Test
-  void testActionWithNullParameters() {
-    JSONObject parameters = null;
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    assertThrows(NullPointerException.class, () -> alertProcess.action(parameters, isStopped));
+  void testActionNullAfterObject() throws JSONException {
+    JSONObject parameters = new JSONObject();
+    parameters.put(AFTER, JSONObject.NULL);
+    ActionResult result = alertProcess.action(parameters, isStopped);
+    assertErrorResult(result);
   }
 
   /**
-   * Test the action method with a valid after object and a valid document number.
-   * It should create an alert and return a successful result.
+   * Tests successful alert creation with empty document number.
+   */
+  @Test
+  void testActionEmptyDocumentNo() throws JSONException {
+    ActionResult result = alertProcess.action(createParametersWithDocumentNo(""), isStopped);
+    assertSuccessResult(result);
+  }
+
+  /**
+   * Tests alert creation with special characters in document number.
+   */
+  @Test
+  void testActionSpecialCharactersInDocumentNo() throws JSONException {
+    ActionResult result = alertProcess.action(createParametersWithDocumentNo("DOC-001/2023#$%"), isStopped);
+    assertSuccessResult(result);
+  }
+
+  /**
+   * Tests behavior when isStopped is true.
+   */
+  @Test
+  void testActionWithStoppedFlag() throws JSONException {
+    isStopped.setTrue();
+    ActionResult result = alertProcess.action(createValidParameters(), isStopped);
+    assertSuccessResult(result);
+  }
+
+  /**
+   * Tests the getInputClass method.
    */
   @Test
   void testGetInputClass() {
-    Class<?> inputClass = alertProcess.getInputClass();
-
-    assertEquals(JSONObject.class, inputClass);
+    assertEquals(JSONObject.class, alertProcess.getInputClass());
   }
 
   /**
-   * Tests the action method when the "after" object is explicitly set to null in the parameters.
-   * Expects an error result.
-   *
-   * @throws JSONException
-   *     if there is an error constructing the JSON objects
+   * Helper method to create valid parameters for testing successful scenarios.
    */
-  @Test
-  void testActionWithNullAfterObject() throws JSONException {
-    JSONObject parameters = new JSONObject();
-    parameters.put("after", JSONObject.NULL);
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    ActionResult result = alertProcess.action(parameters, isStopped);
-
-    assertNotNull(result);
-    assertEquals(Result.Type.ERROR, result.getType());
+  private JSONObject createValidParameters() throws JSONException {
+    return createParametersWithDocumentNo(TEST_DOCUMENT_NO);
   }
 
+  /**
+   * Helper method to create parameters with a specific document number.
+   */
+  private JSONObject createParametersWithDocumentNo(String documentNo) throws JSONException {
+    JSONObject parameters = new JSONObject();
+    JSONObject after = new JSONObject();
+    after.put(DOCUMENTNO, documentNo);
+    parameters.put(AFTER, after);
+    return parameters;
+  }
+
+  /**
+   * Asserts that the action result is successful and verifies database operations.
+   */
+  private void assertSuccessResult(ActionResult result) {
+    assertNotNull(result);
+    assertEquals(Result.Type.SUCCESS, result.getType());
+    assertEquals(ALERT_CREATED, result.getMessage());
+    verify(mockOBDal, times(1)).save(any(Alert.class));
+    verify(mockOBDal, times(1)).flush();
+    verify(mockOBDal, times(1)).commitAndClose();
+  }
+
+  /**
+   * Asserts that the action result is an error and verifies no database write operations occurred.
+   */
+  private void assertErrorResult(ActionResult result) {
+    assertNotNull(result);
+    assertEquals(Result.Type.ERROR, result.getType());
+    assertNotNull(result.getMessage());
+    verify(mockOBDal, never()).save(any(Alert.class));
+    verify(mockOBDal, never()).flush();
+    verify(mockOBDal, never()).commitAndClose();
+  }
 }

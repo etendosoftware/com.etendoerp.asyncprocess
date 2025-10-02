@@ -45,6 +45,11 @@ import javax.servlet.http.HttpServletRequest;
 public class ReceiverRecordConsumer
     implements Consumer<ReceiverRecord<String, AsyncProcessExecution>> {
   private static final Logger logger = LogManager.getLogger();
+  public static final String AFTER = "after";
+  public static final String PARAMS = "params";
+  public static final String ORGANIZATION = "organization";
+  public static final String CLIENT = "client";
+  public static final String CONTEXT = "context";
 
   // Configuration container to reduce constructor parameters
   public static class ConsumerConfig {
@@ -244,14 +249,8 @@ public class ReceiverRecordConsumer
 
       JSONObject params = parseAndSetupParams(receiverRecord, attemptNumber);
       log = updateLogWithRetryInfo(log, attemptNumber);
-      ActionResult result;
-      try {
-        result = executeAction(params);
-      } catch (Exception e) {
-        result = new ActionResult();
-        result.setType(ActionResult.Type.ERROR);
-        result.setMessage("Unexpected error: " + e.getMessage());
-      }
+      // Let exceptions from executeAction propagate so retry logic (handleError) can act on them
+      ActionResult result = executeAction(params);
       params = enrichParamsWithActionResult(params, result);
       log = updateLogWithResult(log, result);
 
@@ -327,46 +326,35 @@ public class ReceiverRecordConsumer
    * Sets up context from message parameters
    */
   private void setupContextFromParams(JSONObject params) throws JSONException {
+    // Early guard: if no contextual info provided, keep existing OBContext or set a safe fallback.
+    if (!params.has(PARAMS) && !params.has(AFTER)) {
+      if (OBContext.getOBContext() != null && OBContext.getOBContext().getUser() != null) {
+        // Existing context is valid; nothing to do.
+        return;
+      }
+      // Fallback to default system user/role plus configured client/org.
+      OBContext.setOBContext("100", "0", config.getClientId(), config.getOrgId());
+      return;
+    }
     ContextInfo contextInfo = new ContextInfo();
-    JSONObject context = new JSONObject();
-    if (params.has("params")) {
-      if (OBContext.getOBContext().getUser() == null) {
-        String strParams = params.getString("params");
-        JSONObject jsonParams = new JSONObject(strParams);
-        if (jsonParams.has("context")) {
-          context = jsonParams.getJSONObject("context");
-          contextInfo.previousUserId = context.optString("user");
-          contextInfo.previousRoleId = context.optString("role");
-          contextInfo.previousClientId = context.optString("client");
-          contextInfo.previousOrgId = context.optString("organization");
-        }
-      } else {
-        contextInfo.previousUserId = OBContext.getOBContext().getUser().getId();
-        contextInfo.previousRoleId = OBContext.getOBContext().getRole().getId();
-        contextInfo.previousClientId = OBContext.getOBContext().getCurrentClient().getId();
-        contextInfo.previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
-        contextInfo.contextChanged = true;
-      }
-      JSONObject paramsObj = new JSONObject(params.getString("params"));
-      if (paramsObj.has("context")) {
-        context = paramsObj.optJSONObject("context");
-      }
-    }
-    if (params.has("after")) {
-      JSONObject after = new JSONObject(params.getString("after"));
-      if (after != null) {
-        context.put("user", after.optString("updatedby"));
-        context.put("client", after.optString("ad_client_id"));
-        context.put("organization", after.optString("ad_org_id"));
-      }
-    }
+    JSONObject context = getContextFromParms(params, contextInfo);
+    extractMethodFromParams(params, context);
+    setOBContext(context, contextInfo);
+  }
+
+  /**
+   * Sets OB context based on provided context information
+   * @param context
+   * @param contextInfo
+   */
+  private static void setOBContext(JSONObject context, ContextInfo contextInfo) {
     String user = context.optString("user", contextInfo.previousUserId);
     String role = context.optString("role", contextInfo.previousRoleId);
     if (StringUtils.isEmpty(role) || StringUtils.equals(role, "null")) {
       role = null;
     }
-    String client = context.optString("client", contextInfo.previousClientId);
-    String organization = context.optString("organization", contextInfo.previousOrgId);
+    String client = context.optString(CLIENT, contextInfo.previousClientId);
+    String organization = context.optString(ORGANIZATION, contextInfo.previousOrgId);
 
     if (StringUtils.isEmpty(user) || StringUtils.isEmpty(client)
         || StringUtils.isEmpty(organization) || StringUtils.equals(user, "null") || StringUtils.equals(role, "null") || StringUtils.equals(client, "null") || StringUtils.equals(organization, "null")) {
@@ -376,6 +364,58 @@ public class ReceiverRecordConsumer
     OBContext.setOBContext(
         user, role, client, organization
     );
+  }
+
+  /**
+   * Extracts method information from parameters
+   * @param params
+   * @param context
+   * @throws JSONException
+   */
+  private static void extractMethodFromParams(JSONObject params, JSONObject context) throws JSONException {
+    if (params.has(AFTER)) {
+      JSONObject after = new JSONObject(params.getString(AFTER));
+      context.put("user", after.optString("updatedby"));
+      context.put(CLIENT, after.optString("ad_client_id"));
+      context.put(ORGANIZATION, after.optString("ad_org_id"));
+    }
+  }
+
+  /**
+   * Extracts context information from parameters
+   * @param params
+   * @param context
+   * @param contextInfo
+   * @return
+   * @throws JSONException
+   */
+  private static JSONObject getContextFromParms(JSONObject params,
+      ContextInfo contextInfo) throws JSONException {
+    JSONObject context = new JSONObject();
+    if (params.has(PARAMS)) {
+      if (OBContext.getOBContext().getUser() == null) {
+        String strParams = params.getString(PARAMS);
+        JSONObject jsonParams = new JSONObject(strParams);
+        if (jsonParams.has(CONTEXT)) {
+          context = jsonParams.getJSONObject(CONTEXT);
+          contextInfo.previousUserId = context.optString("user");
+          contextInfo.previousRoleId = context.optString("role");
+          contextInfo.previousClientId = context.optString(CLIENT);
+          contextInfo.previousOrgId = context.optString(ORGANIZATION);
+        }
+      } else {
+        contextInfo.previousUserId = OBContext.getOBContext().getUser().getId();
+        contextInfo.previousRoleId = OBContext.getOBContext().getRole().getId();
+        contextInfo.previousClientId = OBContext.getOBContext().getCurrentClient().getId();
+        contextInfo.previousOrgId = OBContext.getOBContext().getCurrentOrganization().getId();
+        contextInfo.contextChanged = true;
+      }
+      JSONObject paramsObj = new JSONObject(params.getString(PARAMS));
+      if (paramsObj.has(CONTEXT)) {
+        context = paramsObj.optJSONObject(CONTEXT);
+      }
+    }
+    return context;
   }
 
   /**

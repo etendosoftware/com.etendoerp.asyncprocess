@@ -16,8 +16,30 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Comprehensive monitoring and alerting system for async process operations.
- * Collects metrics, detects anomalies, and triggers alerts.
+ * Central monitoring and alerting component for the asynchronous processing subsystem.
+ *
+ * <p>Responsibilities:
+ * <ul>
+ *   <li>Collect runtime metrics for jobs, consumers, Kafka and the JVM.</li>
+ *   <li>Produce periodic metric snapshots and broadcast them to registered listeners.</li>
+ *   <li>Evaluate alerting rules against collected metrics and notify alert listeners
+ *       when alerts are triggered or resolved.</li>
+ *   <li>Expose programmatic API to record low-level events (job execution, consumer
+ *       activity, Kafka interactions) that are aggregated into metrics.</li>
+ * </ul>
+ * </p>
+ *
+ * <p>Design notes:
+ * <ul>
+ *   <li>Internal state is stored in concurrent collections so that recording operations
+ *       can be performed safely from multiple threads.</li>
+ *   <li>Alert rules are represented by {@link AlertRule} instances that contain a
+ *       {@link AlertRule.MetricsPredicate} to evaluate conditions against a
+ *       {@link MetricsSnapshot}.</li>
+ *   <li>Alerts are managed using {@link AlertState} to avoid repeated notifications
+ *       for the same ongoing condition; state transitions trigger notifications.</li>
+ * </ul>
+ * </p>
  */
 public class AsyncProcessMonitor {
   private static final Logger log = LogManager.getLogger();
@@ -43,15 +65,44 @@ public class AsyncProcessMonitor {
   private final List<MetricsListener> metricsListeners = new ArrayList<>();
   private final List<AlertListener> alertListeners = new ArrayList<>();
   
+  /**
+   * Listener interface for receiving periodic metric snapshots.
+   * Implementers will receive {@link MetricsSnapshot} instances when metrics are
+   * broadcast by the monitor.
+   */
   public interface MetricsListener {
+    /**
+     * Called when a new metrics snapshot is available.
+     *
+     * @param snapshot immutable snapshot that contains metrics at a point in time
+     */
     void onMetricsUpdate(MetricsSnapshot snapshot);
   }
   
+  /**
+   * Listener interface for alert lifecycle notifications. Implementers will be
+   * informed when an alert is triggered and when it is resolved.
+   */
   public interface AlertListener {
+    /**
+     * Called when an alert is triggered.
+     *
+     * @param alert alert object with details about the triggered condition
+     */
     void onAlert(Alert alert);
+
+    /**
+     * Called when an active alert is resolved.
+     *
+     * @param alert alert object describing the resolved alert
+     */
     void onAlertResolved(Alert alert);
   }
   
+  /**
+   * Container for per-job aggregated metrics.
+   * Instances are updated by the monitor when job execution events are recorded.
+   */
   public static class JobMetrics {
     private final String jobId;
     private final String jobName;
@@ -63,11 +114,24 @@ public class AsyncProcessMonitor {
     private final AtomicLong lastProcessedTime = new AtomicLong(0);
     private final AtomicLong averageProcessingTime = new AtomicLong(0);
     
+    /**
+     * Create job metrics holder.
+     *
+     * @param jobId stable identifier for the job
+     * @param jobName human-readable job name
+     */
     public JobMetrics(String jobId, String jobName) {
       this.jobId = jobId;
       this.jobName = jobName;
     }
     
+    /**
+     * Record a processed message for this job.
+     *
+     * @param processingTime elapsed time in milliseconds to process the message
+     * @param success whether the processing succeeded
+     * @param isRetry whether the message was retried
+     */
     public void recordProcessedMessage(long processingTime, boolean success, boolean isRetry) {
       messagesProcessed.increment();
       if (success) {
@@ -100,22 +164,35 @@ public class AsyncProcessMonitor {
     public long getLastProcessedTime() { return lastProcessedTime.get(); }
     public long getAverageProcessingTime() { return averageProcessingTime.get(); }
     
+    /**
+     * Returns the success rate in percentage (0-100). If no messages have been processed
+     * a default of 100.0 is returned (interpreted as no failures recorded yet).
+     */
     public double getSuccessRate() {
       long total = messagesProcessed.sum();
       return total > 0 ? (double) messagesSucceeded.sum() / total * 100 : 100.0;
     }
     
+    /**
+     * Returns the failure rate in percentage (0-100).
+     */
     public double getFailureRate() {
       long total = messagesProcessed.sum();
       return total > 0 ? (double) messagesFailed.sum() / total * 100 : 0.0;
     }
     
+    /**
+     * Returns the retry rate in percentage (0-100).
+     */
     public double getRetryRate() {
       long total = messagesProcessed.sum();
       return total > 0 ? (double) messagesRetried.sum() / total * 100 : 0.0;
     }
   }
   
+  /**
+   * Metrics related to a single consumer instance.
+   */
   public static class ConsumerMetrics {
     private final String consumerId;
     private final String groupId;
@@ -132,20 +209,34 @@ public class AsyncProcessMonitor {
       this.topic = topic;
     }
     
+    /**
+     * Mark that the consumer processed one message.
+     */
     public void recordMessage() {
       messagesConsumed.increment();
       lastActivity.set(System.currentTimeMillis());
     }
     
+    /**
+     * Increment the count of connection lost events for this consumer.
+     */
     public void recordConnectionLost() {
       connectionLost.increment();
     }
     
+    /**
+     * Record a reconnection event and update last activity time.
+     */
     public void recordReconnection() {
       reconnections.increment();
       lastActivity.set(System.currentTimeMillis());
     }
     
+    /**
+     * Update observed lag for this consumer (topic partitions total lag).
+     *
+     * @param lag total lag value to store
+     */
     public void updateLag(long lag) {
       lagTotal.set(lag);
     }
@@ -160,11 +251,19 @@ public class AsyncProcessMonitor {
     public long getLastActivity() { return lastActivity.get(); }
     public long getLag() { return lagTotal.get(); }
     
+    /**
+     * Returns true if the consumer has been idle longer than the provided threshold.
+     *
+     * @param idleThresholdMs threshold in milliseconds
+     */
     public boolean isIdle(long idleThresholdMs) {
       return System.currentTimeMillis() - lastActivity.get() > idleThresholdMs;
     }
   }
   
+  /**
+   * Aggregated Kafka client metrics.
+   */
   public static class KafkaMetrics {
     private final LongAdder connectionAttempts = new LongAdder();
     private final LongAdder connectionFailures = new LongAdder();
@@ -173,6 +272,11 @@ public class AsyncProcessMonitor {
     private final AtomicLong lastConnectionTime = new AtomicLong(0);
     private final AtomicLong avgSendTime = new AtomicLong(0);
     
+    /**
+     * Record a connection attempt to Kafka.
+     *
+     * @param success true if the attempt succeeded
+     */
     public void recordConnectionAttempt(boolean success) {
       connectionAttempts.increment();
       if (success) {
@@ -182,6 +286,12 @@ public class AsyncProcessMonitor {
       }
     }
     
+    /**
+     * Record a message send operation and update average send time.
+     *
+     * @param sendTime elapsed milliseconds for send operation
+     * @param success whether the send succeeded
+     */
     public void recordMessageSent(long sendTime, boolean success) {
       messagesSent.increment();
       if (!success) {
@@ -203,17 +313,26 @@ public class AsyncProcessMonitor {
     public long getLastConnectionTime() { return lastConnectionTime.get(); }
     public long getAverageSendTime() { return avgSendTime.get(); }
     
+    /**
+     * Returns the percentage of successful connection attempts (0-100).
+     */
     public double getConnectionSuccessRate() {
       long total = connectionAttempts.sum();
       return total > 0 ? (double) (total - connectionFailures.sum()) / total * 100 : 100.0;
     }
     
+    /**
+     * Returns the percentage of successful sends (0-100).
+     */
     public double getSendSuccessRate() {
       long total = messagesSent.sum();
       return total > 0 ? (double) (total - sendFailures.sum()) / total * 100 : 100.0;
     }
   }
   
+  /**
+   * System-level metrics (JVM memory, threads, CPU usage).
+   */
   public static class SystemMetrics {
     private final AtomicLong heapUsedBytes = new AtomicLong(0);
     private final AtomicLong heapMaxBytes = new AtomicLong(0);
@@ -239,12 +358,20 @@ public class AsyncProcessMonitor {
     public long getActiveThreads() { return activeThreads.get(); }
     public long getCpuUsagePercent() { return cpuUsagePercent.get(); }
     
+    /**
+     * Returns heap usage percentage (0-100). Returns 0 if max heap size is not available.
+     */
     public double getHeapUsagePercent() {
       long max = heapMaxBytes.get();
       return max > 0 ? (double) heapUsedBytes.get() / max * 100 : 0.0;
     }
   }
   
+  /**
+   * Immutable snapshot of metrics at a specific point in time. This object is sent to
+   * metrics listeners and used to evaluate alert rules. The snapshot contains copies
+   * of the current metric maps to avoid concurrent modification issues.
+   */
   public static class MetricsSnapshot {
     private final LocalDateTime timestamp;
     private final Map<String, JobMetrics> jobMetrics;
@@ -270,10 +397,17 @@ public class AsyncProcessMonitor {
     public SystemMetrics getSystemMetrics() { return systemMetrics; }
   }
   
+  /**
+   * Severity levels for alerts.
+   */
   public enum AlertSeverity {
     INFO, WARNING, CRITICAL
   }
   
+  /**
+   * Types of alerts that the monitor can emit. These represent common problem categories
+   * within the async processing subsystem.
+   */
   public enum AlertType {
     HIGH_FAILURE_RATE,
     HIGH_PROCESSING_TIME,
@@ -285,6 +419,9 @@ public class AsyncProcessMonitor {
     CIRCUIT_BREAKER_OPEN
   }
   
+  /**
+   * Alert model carrying metadata about a detected condition.
+   */
   public static class Alert {
     private final String id;
     private final AlertType type;
@@ -315,6 +452,10 @@ public class AsyncProcessMonitor {
     public Map<String, Object> getMetadata() { return metadata; }
   }
   
+  /**
+   * Definition of an alert rule. Each rule contains a predicate that evaluates a
+   * {@link MetricsSnapshot} and a message template used for notifications.
+   */
   public static class AlertRule {
     private final String name;
     private final AlertType type;
@@ -322,8 +463,17 @@ public class AsyncProcessMonitor {
     private final MetricsPredicate condition;
     private final String messageTemplate;
     
+    /**
+     * Functional predicate used by rules to evaluate a snapshot.
+     */
     @FunctionalInterface
     public interface MetricsPredicate {
+      /**
+       * Evaluate the predicate against the provided snapshot.
+       *
+       * @param snapshot metrics snapshot to test
+       * @return true when the condition is met
+       */
       boolean test(MetricsSnapshot snapshot);
     }
     
@@ -344,6 +494,10 @@ public class AsyncProcessMonitor {
     public String getMessageTemplate() { return messageTemplate; }
   }
   
+  /**
+   * Internal state holder for a rule that tracks whether it is currently active
+   * and timestamps when it was triggered or resolved.
+   */
   public static class AlertState {
     private final String ruleId;
     private boolean isActive;
@@ -357,6 +511,9 @@ public class AsyncProcessMonitor {
       this.triggerCount = 0;
     }
     
+    /**
+     * Mark the alert as triggered. If it was inactive the trigger time is recorded.
+     */
     public void trigger() {
       if (!isActive) {
         isActive = true;
@@ -365,6 +522,9 @@ public class AsyncProcessMonitor {
       triggerCount++;
     }
     
+    /**
+     * Resolve the alert and record the resolution timestamp.
+     */
     public void resolve() {
       if (isActive) {
         isActive = false;
@@ -380,10 +540,19 @@ public class AsyncProcessMonitor {
     public int getTriggerCount() { return triggerCount; }
   }
   
+  /**
+   * Create a monitor using default collection and alert intervals.
+   */
   public AsyncProcessMonitor() {
     this(DEFAULT_METRICS_COLLECTION_INTERVAL_MS, DEFAULT_ALERT_CHECK_INTERVAL_MS);
   }
   
+  /**
+   * Create a monitor with custom intervals. Useful for testing or tuning in different environments.
+   *
+   * @param metricsCollectionIntervalMs interval in milliseconds for metrics collection
+   * @param alertCheckIntervalMs interval in milliseconds for evaluating alert rules
+   */
   public AsyncProcessMonitor(long metricsCollectionIntervalMs, long alertCheckIntervalMs) {
     this.metricsCollectionIntervalMs = metricsCollectionIntervalMs;
     this.alertCheckIntervalMs = alertCheckIntervalMs;
@@ -393,7 +562,9 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Starts monitoring and alerting.
+   * Start monitoring and scheduling of internal tasks (metrics collection, broadcasting and alert checks).
+   * This method is idempotent in the sense that scheduling additional invocations will create more tasks
+   * if called multiple times; callers should ensure start/stop lifecycle is managed.
    */
   public void start() {
     log.info("Starting async process monitoring");
@@ -424,7 +595,7 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Stops monitoring.
+   * Stop the monitor and shutdown internal scheduler. Blocks briefly while awaiting termination.
    */
   public void stop() {
     log.info("Stopping async process monitoring");
@@ -440,16 +611,26 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Records metrics for job execution.
+   * Record an execution event for a job. This updates per-job aggregated metrics.
+   *
+   * @param jobId identifier of the job
+   * @param jobName human readable name of the job
+   * @param processingTime elapsed processing time in milliseconds
+   * @param success true if execution succeeded
+   * @param isRetry true if this execution was a retry attempt
    */
   public void recordJobExecution(String jobId, String jobName, long processingTime, 
-                                boolean success, boolean isRetry) {
+                                  boolean success, boolean isRetry) {
     JobMetrics metrics = jobMetrics.computeIfAbsent(jobId, k -> new JobMetrics(jobId, jobName));
     metrics.recordProcessedMessage(processingTime, success, isRetry);
   }
   
   /**
-   * Records consumer activity.
+   * Record that a consumer processed a message. Creates metrics for the consumer if not present.
+   *
+   * @param consumerId identifier for the consumer instance
+   * @param groupId consumer group id
+   * @param topic topic the consumer reads from
    */
   public void recordConsumerActivity(String consumerId, String groupId, String topic) {
     ConsumerMetrics metrics = consumerMetrics.computeIfAbsent(consumerId, 
@@ -458,7 +639,9 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Records consumer connection issues.
+   * Record that a consumer experienced a lost connection event.
+   *
+   * @param consumerId consumer identifier
    */
   public void recordConsumerConnectionLost(String consumerId) {
     ConsumerMetrics metrics = consumerMetrics.get(consumerId);
@@ -468,7 +651,9 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Records consumer reconnection.
+   * Record that a consumer reconnected successfully.
+   *
+   * @param consumerId consumer identifier
    */
   public void recordConsumerReconnection(String consumerId) {
     ConsumerMetrics metrics = consumerMetrics.get(consumerId);
@@ -478,7 +663,10 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Updates consumer lag.
+   * Update the observed lag value for a consumer.
+   *
+   * @param consumerId consumer identifier
+   * @param lag total lag measured for this consumer
    */
   public void updateConsumerLag(String consumerId, long lag) {
     ConsumerMetrics metrics = consumerMetrics.get(consumerId);
@@ -488,21 +676,28 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Records Kafka connection attempt.
+   * Record an attempt to connect to Kafka. This influences the Kafka metrics and
+   * may be used by alert rules detecting Kafka availability issues.
+   *
+   * @param success true if the connection attempt succeeded
    */
   public void recordKafkaConnection(boolean success) {
     kafkaMetrics.recordConnectionAttempt(success);
   }
   
   /**
-   * Records message send to Kafka.
+   * Record a message send operation to Kafka.
+   *
+   * @param sendTime elapsed time in milliseconds for the send operation
+   * @param success true if the send succeeded
    */
   public void recordKafkaMessageSent(long sendTime, boolean success) {
     kafkaMetrics.recordMessageSent(sendTime, success);
   }
   
   /**
-   * Collects system metrics.
+   * Collect basic system metrics (memory, threads and CPU placeholder).
+   * This method is invoked periodically by the monitor's scheduler.
    */
   private void collectSystemMetrics() {
     try {
@@ -527,7 +722,7 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Broadcasts current metrics to listeners.
+   * Build a metrics snapshot and notify registered metrics listeners.
    */
   private void broadcastMetrics() {
     try {
@@ -552,7 +747,8 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Checks alert rules and triggers alerts.
+   * Evaluate all configured alert rules against a fresh metrics snapshot and
+   * trigger or resolve alerts accordingly.
    */
   private void checkAlerts() {
     try {
@@ -577,7 +773,11 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Checks a specific alert rule.
+   * Evaluate a single alert rule and notify listeners when the rule transitions
+   * between active and resolved states.
+   *
+   * @param rule alert rule to evaluate
+   * @param snapshot metrics snapshot used for evaluation
    */
   private void checkAlertRule(AlertRule rule, MetricsSnapshot snapshot) {
     AlertState state = alertStates.computeIfAbsent(rule.getName(), AlertState::new);
@@ -635,7 +835,7 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Sets up default alert rules.
+   * Initialize default alert rules that cover common failure and performance scenarios.
    */
   private void setupDefaultAlertRules() {
     // High failure rate alert
@@ -698,7 +898,9 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Adds an alert rule.
+   * Add a custom alert rule to the monitor.
+   *
+   * @param rule rule to add; rules are evaluated during alert checks in insertion order
    */
   public void addAlertRule(AlertRule rule) {
     alertRules.add(rule);
@@ -706,7 +908,9 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Removes an alert rule.
+   * Remove an alert rule by name. This also clears any associated alert state.
+   *
+   * @param ruleName identifier of the rule to remove
    */
   public void removeAlertRule(String ruleName) {
     alertRules.removeIf(rule -> rule.getName().equals(ruleName));
@@ -715,93 +919,39 @@ public class AsyncProcessMonitor {
   }
   
   /**
-   * Adds a metrics listener.
+   * Register a metrics listener that will receive periodic {@link MetricsSnapshot}s.
+   *
+   * @param listener implementation to register
    */
   public void addMetricsListener(MetricsListener listener) {
     metricsListeners.add(listener);
   }
   
   /**
-   * Removes a metrics listener.
+   * Remove a previously registered metrics listener.
+   *
+   * @param listener listener to remove
    */
   public void removeMetricsListener(MetricsListener listener) {
     metricsListeners.remove(listener);
   }
   
   /**
-   * Adds an alert listener.
+   * Register an alert listener that will be notified when alerts trigger or resolve.
+   *
+   * @param listener implementation to register
    */
   public void addAlertListener(AlertListener listener) {
     alertListeners.add(listener);
   }
   
   /**
-   * Removes an alert listener.
+   * Remove a previously registered alert listener.
+   *
+   * @param listener listener to remove
    */
   public void removeAlertListener(AlertListener listener) {
     alertListeners.remove(listener);
   }
-  
-  /**
-   * Gets current metrics snapshot.
-   */
-  public MetricsSnapshot getCurrentMetrics() {
-    return new MetricsSnapshot(
-        LocalDateTime.now(),
-        jobMetrics,
-        consumerMetrics,
-        kafkaMetrics,
-        systemMetrics
-    );
-  }
-  
-  /**
-   * Gets alert states.
-   */
-  public Map<String, AlertState> getAlertStates() {
-    return new HashMap<>(alertStates);
-  }
-  
-  /**
-   * Gets monitoring status report.
-   */
-  public String getStatusReport() {
-    StringBuilder report = new StringBuilder();
-    report.append("=== Async Process Monitoring Status ===\n");
-    
-    // Job metrics summary
-    report.append("Jobs (").append(jobMetrics.size()).append("):\n");
-    jobMetrics.forEach((id, metrics) -> {
-      report.append("  ").append(metrics.getJobName()).append(" (").append(id).append(")\n");
-      report.append("    Processed: ").append(metrics.getMessagesProcessed()).append("\n");
-      report.append("    Success Rate: ").append(String.format(NUMBER_FORMAT, metrics.getSuccessRate())).append("\n");
-      report.append("    Avg Processing Time: ").append(metrics.getAverageProcessingTime()).append("ms\n");
-    });
-    
-    // Consumer metrics summary
-    report.append("Consumers (").append(consumerMetrics.size()).append("):\n");
-    consumerMetrics.forEach((id, metrics) -> {
-      report.append("  ").append(id).append(" (").append(metrics.getTopic()).append(")\n");
-      report.append("    Messages: ").append(metrics.getMessagesConsumed()).append("\n");
-      report.append("    Lag: ").append(metrics.getLag()).append("\n");
-      report.append("    Reconnections: ").append(metrics.getReconnections()).append("\n");
-    });
-    
-    // Kafka metrics
-    report.append("Kafka:\n");
-    report.append("  Connection Success Rate: ").append(String.format(NUMBER_FORMAT, kafkaMetrics.getConnectionSuccessRate())).append("\n");
-    report.append("  Send Success Rate: ").append(String.format(NUMBER_FORMAT, kafkaMetrics.getSendSuccessRate())).append("\n");
-    report.append("  Messages Sent: ").append(kafkaMetrics.getMessagesSent()).append("\n");
-    
-    // System metrics
-    report.append("System:\n");
-    report.append("  Heap Usage: ").append(String.format(NUMBER_FORMAT, systemMetrics.getHeapUsagePercent())).append("\n");
-    report.append("  Active Threads: ").append(systemMetrics.getActiveThreads()).append("\n");
-    
-    // Active alerts
-    long activeAlerts = alertStates.values().stream().mapToLong(state -> state.isActive() ? 1 : 0).sum();
-    report.append("Active Alerts: ").append(activeAlerts).append("\n");
-    
-    return report.toString();
-  }
+
 }
