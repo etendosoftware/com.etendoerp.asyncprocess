@@ -15,11 +15,13 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -80,6 +82,10 @@ public class AsyncProcessReconfigurationManagerTest {
   private MockedStatic<OBDal> mockedOBDal;
   private MockedStatic<OBPropertiesProvider> mockedOBProperties;
 
+  // Additional fields to allow verifications / re-stubbing inside tests
+  private OBDal mockOBDalInstance; // real instance mock returned by static OBDal.getInstance()
+  private Properties mockProperties;
+
   @BeforeEach
   void setUp() {
     MockitoAnnotations.openMocks(this);
@@ -97,18 +103,18 @@ public class AsyncProcessReconfigurationManagerTest {
     mockedOBContext.when(OBContext::getOBContext).thenReturn(mockOBContext);
 
     var mockCriteria = mock(OBCriteria.class);
-    var mockOBDalInstance = mock(OBDal.class);
+    mockOBDalInstance = mock(OBDal.class);
     mockedOBDal.when(OBDal::getInstance).thenReturn(mockOBDalInstance);
     // Ensure createCriteria returns an OBCriteria instance (not a Hibernate Criteria mock)
     Mockito.doReturn((OBCriteria) mockCriteria).when(mockOBDalInstance).createCriteria(Job.class);
     Mockito.doReturn((OBCriteria) mockCriteria).when((OBCriteria) mockCriteria).add(any());
     Mockito.doReturn(List.of(mockJob)).when((OBCriteria) mockCriteria).list();
 
-    var mockProperties = mock(Properties.class);
+    mockProperties = mock(Properties.class);
     var mockProvider = mock(OBPropertiesProvider.class);
     mockedOBProperties.when(OBPropertiesProvider::getInstance).thenReturn(mockProvider);
-  Mockito.doReturn(mockProperties).when(mockProvider).getOpenbravoProperties();
-  Mockito.doReturn("true").when(mockProperties).getProperty("kafka.enable", "false");
+    Mockito.doReturn(mockProperties).when(mockProvider).getOpenbravoProperties();
+    Mockito.doReturn("true").when(mockProperties).getProperty("kafka.enable", "false");
 
     manager = new AsyncProcessReconfigurationManager(mockHealthChecker, mockRecoveryManager, TEST_INTERVAL);
   }
@@ -277,5 +283,114 @@ public class AsyncProcessReconfigurationManagerTest {
     // Simulate configuration change by calling private method via reflection or mock setup
     // For simplicity, just verify listener is added
     verify(mockListener, never()).onJobAdded(any());
+  }
+
+  @Test
+  void testStartMonitoringWhenDisabled() {
+    manager.setMonitoringEnabled(false);
+    manager.startMonitoring(); // Should return early (branch coverage)
+    assertFalse(manager.getConfigurationStatus().get("monitoringEnabled").equals(true));
+    // createCriteria should never be invoked because loadCurrentConfiguration not called
+    verify(mockOBDalInstance, never()).createCriteria(Job.class);
+  }
+
+  @Test
+  void testForceReloadKafkaUnhealthySkipsDBAccess() {
+    when(mockHealthChecker.isKafkaHealthy()).thenReturn(false);
+    manager.forceConfigurationReload();
+    // Kafka unhealthy => no DB call
+    verify(mockOBDalInstance, never()).createCriteria(Job.class);
+  }
+
+  @Test
+  void testForceReloadReconfigurationDisabledSkipsProcessing() {
+    manager.setReconfigurationEnabled(false);
+    manager.forceConfigurationReload();
+    verify(mockOBDalInstance, never()).createCriteria(Job.class);
+  }
+
+  @Test
+  @SuppressWarnings("squid:S3011")
+  void testApplyConfigurationChanges_AddModifyRemove() throws Exception {
+    // Build initial active jobs via reflection
+    Field activeJobsField = AsyncProcessReconfigurationManager.class.getDeclaredField("activeJobs");
+    activeJobsField.setAccessible(true);
+    @SuppressWarnings("unchecked")
+    Map<String, Job> activeJobs = (Map<String, Job>) activeJobsField.get(manager);
+
+    // Old jobs
+    Job oldJob1 = mock(Job.class);
+    Job oldJob2 = mock(Job.class);
+    Date base = new Date();
+    when(oldJob1.getId()).thenReturn("job1");
+    when(oldJob1.getName()).thenReturn("Job 1");
+    when(oldJob1.getUpdated()).thenReturn(base);
+
+    when(oldJob2.getId()).thenReturn("job2");
+    when(oldJob2.getName()).thenReturn("Job 2");
+    when(oldJob2.getUpdated()).thenReturn(base);
+
+    activeJobs.put("job1", oldJob1);
+    activeJobs.put("job2", oldJob2);
+
+    // New configurations: modify job2 (updated timestamp), remove job1, add job3
+    Job newJob2 = mock(Job.class);
+    when(newJob2.getId()).thenReturn("job2");
+    when(newJob2.getName()).thenReturn("Job 2 New");
+    when(newJob2.getUpdated()).thenReturn(new Date(base.getTime() + 5000));
+
+    Job newJob3 = mock(Job.class);
+    when(newJob3.getId()).thenReturn("job3");
+    when(newJob3.getName()).thenReturn("Job 3");
+    when(newJob3.getUpdated()).thenReturn(new Date(base.getTime() + 10000));
+
+    Map<String, Job> newConfigs = new HashMap<>();
+    newConfigs.put("job2", newJob2); // modified
+    newConfigs.put("job3", newJob3); // added
+
+    // Recovery manager returns consumer for removed job1
+    Map<String, Object> recoveryMap = new HashMap<>();
+    recoveryMap.put("job1-consumerA", new Object());
+    when(mockRecoveryManager.getRecoveryStatus()).thenReturn(recoveryMap);
+
+    // Listener to verify notifications
+    manager.addConfigurationChangeListener(mockListener);
+
+    Method applyMethod = AsyncProcessReconfigurationManager.class.getDeclaredMethod("applyConfigurationChanges", Map.class);
+    applyMethod.setAccessible(true);
+    applyMethod.invoke(manager, newConfigs);
+
+    // Wait a bit for async task to finish
+    try {
+      Thread.sleep(200);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+
+    // Verify listener callbacks
+    verify(mockListener, times(1)).onJobRemoved("job1");
+    verify(mockListener, times(1)).onJobModified(oldJob2, newJob2);
+    verify(mockListener, times(1)).onJobAdded(newJob3);
+
+    // unregisterConsumer called for removed job1 consumer
+    verify(mockRecoveryManager, times(1)).unregisterConsumer("job1-consumerA");
+
+    // Active jobs should now reflect new configuration
+    List<String> ids = manager.getActiveJobIds();
+    assertTrue(ids.contains("job2"));
+    assertTrue(ids.contains("job3"));
+    assertFalse(ids.contains("job1"));
+  }
+
+  @Test
+  void testAsyncJobsDisabledExcludesJobs() {
+    // Re-stub property to disable async jobs
+    Mockito.doReturn("false").when(mockProperties).getProperty("kafka.enable", "false");
+
+    manager.forceConfigurationReload();
+
+    // Since criteria still called (Kafka healthy) but no jobs added
+    verify(mockOBDalInstance, times(1)).createCriteria(Job.class);
+    assertTrue(manager.getActiveJobIds().isEmpty());
   }
 }

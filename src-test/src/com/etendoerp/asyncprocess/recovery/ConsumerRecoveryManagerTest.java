@@ -22,6 +22,7 @@ import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import org.openbravo.base.exception.OBException;
 
 import com.etendoerp.asyncprocess.config.AsyncProcessConfig;
 import com.etendoerp.asyncprocess.health.KafkaHealthChecker;
@@ -495,6 +496,53 @@ class ConsumerRecoveryManagerTest {
     schedulerField.setAccessible(true);
     schedulerField.set(localManager, schedulerMock);
     assertDoesNotThrow(localManager::shutdown);
+  }
+
+  @Test
+  void testForceRecoverConsumerWrapsExceptionInOBException() {
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    manager.registerConsumer(consumerInfo);
+    manager.setConsumerRecreationFunction(info -> { throw new RuntimeException("boom"); });
+    OBException ex = assertThrows(OBException.class, () -> manager.forceRecoverConsumer(consumerInfo.getConsumerId()));
+    assertNotNull(ex.getCause());
+    assertEquals("boom", ex.getCause().getMessage());
+  }
+
+  @Test
+  void testUnregisterConsumerDisposesActiveSubscription() {
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    Disposable disposable = mock(Disposable.class);
+    when(disposable.isDisposed()).thenReturn(false);
+    consumerInfo.setSubscription(disposable);
+    manager.registerConsumer(consumerInfo);
+    manager.unregisterConsumer(consumerInfo.getConsumerId());
+    Mockito.verify(disposable).dispose();
+  }
+
+  @Test
+  void testScheduleConsumerRecoveryKafkaUnhealthySkipsScheduling() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    when(healthChecker.isKafkaHealthy()).thenReturn(false);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    ConsumerRecoveryManager.ConsumerInfo consumerInfo = buildDummyConsumerInfo();
+    localManager.registerConsumer(consumerInfo);
+    var scheduleConsumerRecovery = ConsumerRecoveryManager.class.getDeclaredMethod("scheduleConsumerRecovery", String.class, String.class);
+    scheduleConsumerRecovery.setAccessible(true);
+    scheduleConsumerRecovery.invoke(localManager, consumerInfo.getGroupId(), "unhealthy");
+    java.lang.reflect.Field attemptsField = ConsumerRecoveryManager.class.getDeclaredField("recoveryAttempts");
+    attemptsField.setAccessible(true);
+    @SuppressWarnings("unchecked") Map<String, AtomicInteger> attempts = (Map<String, AtomicInteger>) attemptsField.get(localManager);
+    assertFalse(attempts.containsKey(consumerInfo.getGroupId()));
+  }
+
+  @Test
+  void testCalculateRecoveryDelay() throws Exception {
+    KafkaHealthChecker healthChecker = mock(KafkaHealthChecker.class);
+    ConsumerRecoveryManager localManager = new ConsumerRecoveryManager(healthChecker);
+    var calculateRecoveryDelay = ConsumerRecoveryManager.class.getDeclaredMethod("calculateRecoveryDelay", int.class);
+    calculateRecoveryDelay.setAccessible(true);
+    long delay = (long) calculateRecoveryDelay.invoke(localManager, 3); // attempt 3 => base * multiplier^(attempt-1) = 10000 * 2^2 = 40000
+    assertEquals(40000L, delay);
   }
 
   /**

@@ -114,6 +114,9 @@ class AsyncProcessStartupTest {
   public static final String TOPIC = "topic-1";
   public static final String GROUP_1 = "group-1";
   public static final String CONSUMER_1 = "consumer-1";
+  public static final String INIT_CIRCUIT_BREAKER = "initializeCircuitBreaker";
+  public static final String EXCEPTION_MSG = "Expected init() to handle exceptions internally, but exception was thrown: ";
+
   @Mock
   private OBPropertiesProvider mockPropertiesProvider;
 
@@ -864,7 +867,7 @@ class AsyncProcessStartupTest {
         })) {
 
       // Call the private method
-      Method method = AsyncProcessStartup.class.getDeclaredMethod("initializeCircuitBreaker");
+      Method method = AsyncProcessStartup.class.getDeclaredMethod(INIT_CIRCUIT_BREAKER);
       method.setAccessible(true);
       method.invoke(asyncProcessStartup);
 
@@ -907,7 +910,7 @@ class AsyncProcessStartupTest {
          })) {
       
       // Call the private method and expect OBException
-      Method method = AsyncProcessStartup.class.getDeclaredMethod("initializeCircuitBreaker");
+      Method method = AsyncProcessStartup.class.getDeclaredMethod(INIT_CIRCUIT_BREAKER);
       method.setAccessible(true);
       
       InvocationTargetException exception = assertThrows(InvocationTargetException.class, 
@@ -944,7 +947,7 @@ class AsyncProcessStartupTest {
          })) {
       
       // Call the private method and expect OBException
-      Method method = AsyncProcessStartup.class.getDeclaredMethod("initializeCircuitBreaker");
+      Method method = AsyncProcessStartup.class.getDeclaredMethod(INIT_CIRCUIT_BREAKER);
       method.setAccessible(true);
       
       InvocationTargetException exception = assertThrows(InvocationTargetException.class, 
@@ -1031,7 +1034,7 @@ class AsyncProcessStartupTest {
       // If we reach here, the exception was caught and handled properly
     } catch (Exception e) {
       // If an exception is thrown, the test should fail as the method should handle it internally
-      fail("Expected init() to handle exceptions internally, but exception was thrown: " + e.getMessage());
+      fail(EXCEPTION_MSG + e.getMessage());
     }
 
     // Verify that properties were attempted to be accessed
@@ -1058,7 +1061,7 @@ class AsyncProcessStartupTest {
         // If we reach here, the exception was caught and handled properly
       } catch (Exception e) {
         // If an exception is thrown, the test should fail as the method should handle it internally
-        fail("Expected init() to handle exceptions internally, but exception was thrown: " + e.getMessage());
+        fail(EXCEPTION_MSG + e.getMessage());
       }
 
       // Verify that properties were accessed twice: once in init() and once in handleStartupFailure()
@@ -1089,7 +1092,7 @@ class AsyncProcessStartupTest {
         // If we reach here, the exception was caught and handled properly
       } catch (Exception e) {
         // If an exception is thrown, the test should fail as the method should handle it internally
-        fail("Expected init() to handle exceptions internally, but exception was thrown: " + e.getMessage());
+        fail(EXCEPTION_MSG + e.getMessage());
       }
 
       // Verify that the KafkaClientManager was created (indicating we got past that point)
@@ -1105,7 +1108,7 @@ class AsyncProcessStartupTest {
   @Test
   void testHandleStartupFailure_WhenHealthCheckerIsNull_InitializesHealthChecker() throws Exception {
     // Ensure health checker is null
-    inject("healthChecker", null);
+    inject(HEALTH_CHECKER, null);
 
     when(mockProperties.getProperty(KAFKA_URL_KEY)).thenReturn(KAFKA_URL_VALUE);
 
@@ -1117,7 +1120,7 @@ class AsyncProcessStartupTest {
     method.invoke(asyncProcessStartup, testException);
 
     // Verify that health checker was initialized
-    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField("healthChecker");
+    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField(HEALTH_CHECKER);
     healthCheckerField.setAccessible(true);
     KafkaHealthChecker healthChecker = (KafkaHealthChecker) healthCheckerField.get(asyncProcessStartup);
     assertNotNull(healthChecker);
@@ -1133,7 +1136,7 @@ class AsyncProcessStartupTest {
   void testHandleStartupFailure_WhenHealthCheckerExists_DoesNotReinitialize() throws Exception {
     // Set up an existing health checker
     KafkaHealthChecker existingChecker = mock(KafkaHealthChecker.class);
-    inject("healthChecker", existingChecker);
+    inject(HEALTH_CHECKER, existingChecker);
 
     Exception testException = new RuntimeException("Test startup failure");
 
@@ -1143,7 +1146,7 @@ class AsyncProcessStartupTest {
     method.invoke(asyncProcessStartup, testException);
 
     // Verify that the same health checker instance is still there
-    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField("healthChecker");
+    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField(HEALTH_CHECKER);
     healthCheckerField.setAccessible(true);
     KafkaHealthChecker healthChecker = (KafkaHealthChecker) healthCheckerField.get(asyncProcessStartup);
     assertEquals(existingChecker, healthChecker);
@@ -1158,7 +1161,7 @@ class AsyncProcessStartupTest {
   @Test
   void testHandleStartupFailure_WhenHealthCheckerInitializationFails_HandlesGracefully() throws Exception {
     // Ensure health checker is null
-    inject("healthChecker", null);
+    inject(HEALTH_CHECKER, null);
 
     // Mock properties provider to throw an exception
     when(mockPropertiesProvider.getOpenbravoProperties()).thenThrow(new RuntimeException("Properties failure"));
@@ -1173,7 +1176,7 @@ class AsyncProcessStartupTest {
     method.invoke(asyncProcessStartup, testException);
 
     // Verify that health checker is still null due to initialization failure
-    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField("healthChecker");
+    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField(HEALTH_CHECKER);
     healthCheckerField.setAccessible(true);
     KafkaHealthChecker healthChecker = (KafkaHealthChecker) healthCheckerField.get(asyncProcessStartup);
     // Health checker should still be null since initialization failed
@@ -1189,7 +1192,7 @@ class AsyncProcessStartupTest {
   @Test
   void testHandleStartupFailure_WithDockerConfiguration_UsesDockerKafkaHost() throws Exception {
     // Ensure health checker is null
-    inject("healthChecker", null);
+    inject(HEALTH_CHECKER, null);
 
     // Set up Docker configuration
     when(mockProperties.containsKey(KAFKA_URL_KEY)).thenReturn(false);
@@ -1204,7 +1207,7 @@ class AsyncProcessStartupTest {
     method.invoke(asyncProcessStartup, testException);
 
     // Verify that health checker was initialized with Docker Kafka host
-    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField("healthChecker");
+    Field healthCheckerField = AsyncProcessStartup.class.getDeclaredField(HEALTH_CHECKER);
     healthCheckerField.setAccessible(true);
     KafkaHealthChecker healthChecker = (KafkaHealthChecker) healthCheckerField.get(asyncProcessStartup);
     assertNotNull(healthChecker);
