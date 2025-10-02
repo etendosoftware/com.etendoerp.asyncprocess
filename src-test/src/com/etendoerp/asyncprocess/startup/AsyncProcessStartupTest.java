@@ -116,7 +116,9 @@ class AsyncProcessStartupTest {
   public static final String CONSUMER_1 = "consumer-1";
   public static final String INIT_CIRCUIT_BREAKER = "initializeCircuitBreaker";
   public static final String EXCEPTION_MSG = "Expected init() to handle exceptions internally, but exception was thrown: ";
-
+  public static final String STARTUP_FAILURE = "Test startup failure";
+  public static final String HANDLE_STARTUP_FAILURE = "handleStartupFailure";
+  
   @Mock
   private OBPropertiesProvider mockPropertiesProvider;
 
@@ -1112,10 +1114,10 @@ class AsyncProcessStartupTest {
 
     when(mockProperties.getProperty(KAFKA_URL_KEY)).thenReturn(KAFKA_URL_VALUE);
 
-    Exception testException = new RuntimeException("Test startup failure");
+    Exception testException = new RuntimeException(STARTUP_FAILURE);
 
     // Use reflection to call the private method
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("handleStartupFailure", Exception.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(HANDLE_STARTUP_FAILURE, Exception.class);
     method.setAccessible(true);
     method.invoke(asyncProcessStartup, testException);
 
@@ -1138,10 +1140,10 @@ class AsyncProcessStartupTest {
     KafkaHealthChecker existingChecker = mock(KafkaHealthChecker.class);
     inject(HEALTH_CHECKER, existingChecker);
 
-    Exception testException = new RuntimeException("Test startup failure");
+    Exception testException = new RuntimeException(STARTUP_FAILURE);
 
     // Use reflection to call the private method
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("handleStartupFailure", Exception.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(HANDLE_STARTUP_FAILURE, Exception.class);
     method.setAccessible(true);
     method.invoke(asyncProcessStartup, testException);
 
@@ -1166,10 +1168,10 @@ class AsyncProcessStartupTest {
     // Mock properties provider to throw an exception
     when(mockPropertiesProvider.getOpenbravoProperties()).thenThrow(new RuntimeException("Properties failure"));
 
-    Exception testException = new RuntimeException("Test startup failure");
+    Exception testException = new RuntimeException(STARTUP_FAILURE);
 
     // Use reflection to call the private method - should not throw exception
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("handleStartupFailure", Exception.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(HANDLE_STARTUP_FAILURE, Exception.class);
     method.setAccessible(true);
 
     // This should not throw an exception despite the failure
@@ -1199,10 +1201,10 @@ class AsyncProcessStartupTest {
     when(mockProperties.containsKey(DOCKER_TOMCAT_NAME)).thenReturn(true);
     when(mockProperties.getProperty(DOCKER_TOMCAT_NAME, KAFKA_ENABLE_VALUE)).thenReturn("true");
 
-    Exception testException = new RuntimeException("Test startup failure");
+    Exception testException = new RuntimeException(STARTUP_FAILURE);
 
     // Use reflection to call the private method
-    Method method = AsyncProcessStartup.class.getDeclaredMethod("handleStartupFailure", Exception.class);
+    Method method = AsyncProcessStartup.class.getDeclaredMethod(HANDLE_STARTUP_FAILURE, Exception.class);
     method.setAccessible(true);
     method.invoke(asyncProcessStartup, testException);
 

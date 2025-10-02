@@ -85,6 +85,9 @@ class JobProcessorTest {
   public static final String TEST_JOBLINE_ID_0 = "test-jobline-id-0";
   public static final String CREATE_ACTION_FACTORY = "createActionFactory";
   public static final String ACTION_CLASS = "com.smf.jobs.Action";
+  public static final String GET_JOB_THREADS = "getJobParallelThreads";
+  public static final String CONVERT_STATE = "convertState";
+  public static final String JOB_LINE_1 = "jobLine1";
 
   @Mock private AsyncProcessMonitor processMonitor;
   @Mock private ConsumerRecoveryManager recoveryManager;
@@ -167,15 +170,15 @@ class JobProcessorTest {
 
     // Test case 1: Valid number
     when(job.get(ETAP_PARALLEL_THREADS)).thenReturn("4");
-    assertEquals(4, (int) invokePrivateMethod(jobProcessor, "getJobParallelThreads", new Class<?>[]{com.smf.jobs.model.Job.class}, job));
+    assertEquals(4, (int) invokePrivateMethod(jobProcessor, GET_JOB_THREADS, new Class<?>[]{com.smf.jobs.model.Job.class}, job));
 
     // Test case 2: Null value
     when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(null);
-    assertEquals(8, (int) invokePrivateMethod(jobProcessor, "getJobParallelThreads", new Class<?>[]{com.smf.jobs.model.Job.class}, job));
+    assertEquals(8, (int) invokePrivateMethod(jobProcessor, GET_JOB_THREADS, new Class<?>[]{com.smf.jobs.model.Job.class}, job));
 
     // Test case 3: Not a number
     when(job.get(ETAP_PARALLEL_THREADS)).thenReturn(NOTANUMBER);
-    assertEquals(8, (int) invokePrivateMethod(jobProcessor, "getJobParallelThreads", new Class<?>[]{com.smf.jobs.model.Job.class}, job));
+    assertEquals(8, (int) invokePrivateMethod(jobProcessor, GET_JOB_THREADS, new Class<?>[]{com.smf.jobs.model.Job.class}, job));
   }
 
   @Test
@@ -232,9 +235,9 @@ class JobProcessorTest {
 
   @Test
   void testConvertState() throws Exception {
-    assertNotNull(invokePrivateMethod(jobProcessor, "convertState", new Class<?>[]{String.class}, "STARTED"));
-    assertNotNull(invokePrivateMethod(jobProcessor, "convertState", new Class<?>[]{String.class}, "INVALID"));
-    assertNotNull(invokePrivateMethod(jobProcessor, "convertState", new Class<?>[]{String.class}, new Object[]{null}));
+    assertNotNull(invokePrivateMethod(jobProcessor, CONVERT_STATE, new Class<?>[]{String.class}, "STARTED"));
+    assertNotNull(invokePrivateMethod(jobProcessor, CONVERT_STATE, new Class<?>[]{String.class}, "INVALID"));
+    assertNotNull(invokePrivateMethod(jobProcessor, CONVERT_STATE, new Class<?>[]{String.class}, new Object[]{null}));
   }
 
   @Test
@@ -493,13 +496,13 @@ class JobProcessorTest {
       org.openbravo.client.application.Process mockProcess = mock(org.openbravo.client.application.Process.class);
       when(mockJob.getJOBSJobLineList()).thenReturn(List.of(mockJobLine));
       when(mockJobLine.getAction()).thenReturn(mockProcess);
-      when(mockJobLine.getId()).thenReturn("jobLine1");
+      when(mockJobLine.getId()).thenReturn(JOB_LINE_1);
       when(mockProcess.getJavaClassName()).thenReturn("java.lang.String");
       doReturn(List.of(mockJob)).when(jp).loadAsyncJobs();
       Map<String, Supplier<Action>> suppliers = jp.preloadActionSuppliers();
       assertEquals(1, suppliers.size());
-      assertTrue(suppliers.containsKey("jobLine1"));
-      assertNotNull(suppliers.get("jobLine1"));
+      assertTrue(suppliers.containsKey(JOB_LINE_1));
+      assertNotNull(suppliers.get(JOB_LINE_1));
     }
   }
 

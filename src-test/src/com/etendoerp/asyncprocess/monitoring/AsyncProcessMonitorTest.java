@@ -486,4 +486,128 @@ class AsyncProcessMonitorTest {
     // Verify that the interrupted status is restored
     assertTrue(Thread.currentThread().isInterrupted(), "Thread interrupted status should be restored");
   }
+
+  /**
+   * Triggers multiple default alert rules to increase coverage of rule predicates.
+   */
+  @Test
+  void testDefaultAlertRulesTriggered() throws Exception {
+    // Slow processing time (>30s average)
+    monitor.recordJobExecution("jobSlow", "Slow Job", 31000, true, false);
+
+    // Consumer lag (>1000)
+    monitor.recordConsumerActivity("cLag", "g1", "t1");
+    monitor.updateConsumerLag("cLag", 2001);
+
+    // Idle consumer (set lastActivity far in past >5 min)
+    monitor.recordConsumerActivity("cIdle", "g1", "t1");
+    Field consumerMetricsField = AsyncProcessMonitor.class.getDeclaredField("consumerMetrics");
+    consumerMetricsField.setAccessible(true);
+    Map<String, AsyncProcessMonitor.ConsumerMetrics> consumerMetrics = (Map<String, AsyncProcessMonitor.ConsumerMetrics>) consumerMetricsField.get(monitor);
+    AsyncProcessMonitor.ConsumerMetrics idle = consumerMetrics.get("cIdle");
+    Field lastActivityField = AsyncProcessMonitor.ConsumerMetrics.class.getDeclaredField("lastActivity");
+    lastActivityField.setAccessible(true);
+    java.util.concurrent.atomic.AtomicLong lastActivity = (java.util.concurrent.atomic.AtomicLong) lastActivityField.get(idle);
+    lastActivity.set(System.currentTimeMillis() - 301_000); // >300000 threshold
+
+    // Kafka connection issues (success rate < 90%)
+    monitor.recordKafkaConnection(false); // failure
+    monitor.recordKafkaConnection(true);
+    monitor.recordKafkaConnection(true);
+    monitor.recordKafkaConnection(true);
+    monitor.recordKafkaConnection(true); // 5 attempts, 1 failure => 80%
+
+    // High memory usage (>80%)
+    Field systemMetricsField = AsyncProcessMonitor.class.getDeclaredField("systemMetrics");
+    systemMetricsField.setAccessible(true);
+    AsyncProcessMonitor.SystemMetrics sys = (AsyncProcessMonitor.SystemMetrics) systemMetricsField.get(monitor);
+    sys.updateMemoryUsage(90, 100); // 90%
+
+    AtomicBoolean anyAlert = new AtomicBoolean(false);
+    Field alertListenersField = AsyncProcessMonitor.class.getDeclaredField(ALERT_LISTENERS);
+    alertListenersField.setAccessible(true);
+    List<AsyncProcessMonitor.AlertListener> alertListeners = (List<AsyncProcessMonitor.AlertListener>) alertListenersField.get(monitor);
+    final int[] triggeredCount = {0};
+    alertListeners.add(new AsyncProcessMonitor.AlertListener() {
+      public void onAlert(AsyncProcessMonitor.Alert alert) { anyAlert.set(true); triggeredCount[0]++; }
+      public void onAlertResolved(AsyncProcessMonitor.Alert alert) { }
+    });
+
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(CHECK_ALERTS);
+    checkAlertsMethod.setAccessible(true);
+    checkAlertsMethod.invoke(monitor);
+
+    // Expect at least 5 default alerts (all except high failure rate)
+    assertTrue(anyAlert.get(), "At least one default alert should trigger");
+    assertTrue(triggeredCount[0] >= 5, "Expected >=5 alerts triggered, got " + triggeredCount[0]);
+  }
+
+  /**
+   * Ensures removeAlertRule also clears internal alert state.
+   */
+  @Test
+  void testRemoveAlertRuleClearsState() throws Exception {
+    AsyncProcessMonitor.AlertRule temp = new AsyncProcessMonitor.AlertRule(
+        "temp-remove", AsyncProcessMonitor.AlertType.HIGH_FAILURE_RATE,
+        AsyncProcessMonitor.AlertSeverity.WARNING, snap -> true, "Temp rule");
+    monitor.addAlertRule(temp);
+
+    // Trigger once to create state
+    java.lang.reflect.Method checkAlertsMethod = AsyncProcessMonitor.class.getDeclaredMethod(CHECK_ALERTS);
+    checkAlertsMethod.setAccessible(true);
+    checkAlertsMethod.invoke(monitor);
+
+    Field alertStatesField = AsyncProcessMonitor.class.getDeclaredField("alertStates");
+    alertStatesField.setAccessible(true);
+    Map<String, AsyncProcessMonitor.AlertState> alertStates = (Map<String, AsyncProcessMonitor.AlertState>) alertStatesField.get(monitor);
+    assertTrue(alertStates.containsKey("temp-remove"), "Alert state should exist after trigger");
+
+    monitor.removeAlertRule("temp-remove");
+
+    // Access alertRules list to ensure removal
+    Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
+    alertRulesField.setAccessible(true);
+    List<AsyncProcessMonitor.AlertRule> alertRules = (List<AsyncProcessMonitor.AlertRule>) alertRulesField.get(monitor);
+
+    assertFalse(alertRules.stream().anyMatch(r -> r.getName().equals("temp-remove")), "Rule list should not contain removed rule");
+    assertFalse(alertStates.containsKey("temp-remove"), "Alert state should be cleared for removed rule");
+  }
+
+  /**
+   * Forces the stop() path where awaitTermination returns false causing shutdownNow().
+   */
+  @Test
+  void testStopForcesShutdownOnTimeout() throws Exception {
+    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField("monitoringScheduler");
+    monitoringSchedulerField.setAccessible(true);
+    java.util.concurrent.ScheduledThreadPoolExecutor custom = new java.util.concurrent.ScheduledThreadPoolExecutor(1) {
+      @SuppressWarnings("unused")
+      private boolean shutdownNowCalled = false;
+      @Override
+      public java.util.List<Runnable> shutdownNow() {
+        try {
+          Field f = this.getClass().getDeclaredField("shutdownNowCalled");
+          f.setAccessible(true);
+            f.setBoolean(this, true);
+        } catch (Exception ignored) { }
+        return super.shutdownNow();
+      }
+      @Override
+      public boolean awaitTermination(long timeout, java.util.concurrent.TimeUnit unit) {
+        return false; // force timeout path
+      }
+    };
+    monitoringSchedulerField.set(monitor, custom);
+
+    monitor.stop();
+
+    assertTrue(custom.isShutdown(), "Scheduler should be shutdown");
+    try {
+      Field f = custom.getClass().getDeclaredField("shutdownNowCalled");
+      f.setAccessible(true);
+      assertTrue(f.getBoolean(custom), "shutdownNow should have been invoked");
+    } catch (NoSuchFieldException e) {
+      // Ignore if field not found
+    }
+  }
 }

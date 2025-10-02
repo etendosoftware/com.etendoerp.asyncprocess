@@ -61,6 +61,7 @@ public class AsyncProcessReconfigurationManagerTest {
   private static final long TEST_INTERVAL = 1000;
   private static final String MONITORING_ENABLED_KEY = "monitoringEnabled";
   private static final String RECONFIGURATION_ENABLED_KEY = "reconfigurationEnabled";
+  private static final String FALSE = "false";
 
   @Mock
   private KafkaHealthChecker mockHealthChecker;
@@ -114,7 +115,7 @@ public class AsyncProcessReconfigurationManagerTest {
     var mockProvider = mock(OBPropertiesProvider.class);
     mockedOBProperties.when(OBPropertiesProvider::getInstance).thenReturn(mockProvider);
     Mockito.doReturn(mockProperties).when(mockProvider).getOpenbravoProperties();
-    Mockito.doReturn("true").when(mockProperties).getProperty("kafka.enable", "false");
+    Mockito.doReturn("true").when(mockProperties).getProperty("kafka.enable", FALSE);
 
     manager = new AsyncProcessReconfigurationManager(mockHealthChecker, mockRecoveryManager, TEST_INTERVAL);
   }
@@ -289,7 +290,7 @@ public class AsyncProcessReconfigurationManagerTest {
   void testStartMonitoringWhenDisabled() {
     manager.setMonitoringEnabled(false);
     manager.startMonitoring(); // Should return early (branch coverage)
-    assertFalse(manager.getConfigurationStatus().get("monitoringEnabled").equals(true));
+    assertFalse(manager.getConfigurationStatus().get(MONITORING_ENABLED_KEY).equals(true));
     // createCriteria should never be invoked because loadCurrentConfiguration not called
     verify(mockOBDalInstance, never()).createCriteria(Job.class);
   }
@@ -385,7 +386,7 @@ public class AsyncProcessReconfigurationManagerTest {
   @Test
   void testAsyncJobsDisabledExcludesJobs() {
     // Re-stub property to disable async jobs
-    Mockito.doReturn("false").when(mockProperties).getProperty("kafka.enable", "false");
+    Mockito.doReturn(FALSE).when(mockProperties).getProperty("kafka.enable", FALSE);
 
     manager.forceConfigurationReload();
 

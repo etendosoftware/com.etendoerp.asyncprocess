@@ -62,6 +62,7 @@ class ConsumerRecoveryManagerTest {
   public static final String TEST_TOPIC = "testTopic";
   public static final String JOB_LINE_ID = "jobLineId";
   public static final String RECOVER_CONSUMER = "recoverConsumer";
+  public static final String RECOVERY_ATTEMPTS = "recoveryAttempts";
   /**
    * The ConsumerRecoveryManager instance under test.
    */
@@ -185,7 +186,7 @@ class ConsumerRecoveryManagerTest {
 
     manager.registerConsumer(consumerInfo);
 
-    java.lang.reflect.Field attemptsField = ConsumerRecoveryManager.class.getDeclaredField("recoveryAttempts");
+    java.lang.reflect.Field attemptsField = ConsumerRecoveryManager.class.getDeclaredField(RECOVERY_ATTEMPTS);
     attemptsField.setAccessible(true);
     @SuppressWarnings("unchecked")
     Map<String, AtomicInteger> attempts = (Map<String, AtomicInteger>) attemptsField.get(manager);
@@ -203,7 +204,7 @@ class ConsumerRecoveryManagerTest {
     assertEquals(TEST_TOPIC, consumerStatus.get("topic"));
     assertEquals(false, consumerStatus.get("active"));
     assertEquals(true, consumerStatus.get("subscriptionActive"));
-    assertEquals(3, consumerStatus.get("recoveryAttempts"));
+    assertEquals(3, consumerStatus.get(RECOVERY_ATTEMPTS));
   }
 
   /**
@@ -529,7 +530,7 @@ class ConsumerRecoveryManagerTest {
     var scheduleConsumerRecovery = ConsumerRecoveryManager.class.getDeclaredMethod("scheduleConsumerRecovery", String.class, String.class);
     scheduleConsumerRecovery.setAccessible(true);
     scheduleConsumerRecovery.invoke(localManager, consumerInfo.getGroupId(), "unhealthy");
-    java.lang.reflect.Field attemptsField = ConsumerRecoveryManager.class.getDeclaredField("recoveryAttempts");
+    java.lang.reflect.Field attemptsField = ConsumerRecoveryManager.class.getDeclaredField(RECOVERY_ATTEMPTS);
     attemptsField.setAccessible(true);
     @SuppressWarnings("unchecked") Map<String, AtomicInteger> attempts = (Map<String, AtomicInteger>) attemptsField.get(localManager);
     assertFalse(attempts.containsKey(consumerInfo.getGroupId()));
