@@ -28,6 +28,8 @@ class AsyncProcessMonitorTest {
   public static final String ALERT_LISTENERS = "alertListeners";
   public static final String CHECK_ALERTS = "checkAlerts";
   public static final String BROADCAST_METRICS = "broadcastMetrics";
+  public static final String MONITORING_SCHEDULER = "monitoringScheduler";
+  public static final String TEMP_REMOVE = "temp-remove";
   private AsyncProcessMonitor monitor;
 
   @BeforeEach
@@ -191,7 +193,7 @@ class AsyncProcessMonitorTest {
     monitor.start();
     monitor.stop();
     monitor.stop();
-    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField("monitoringScheduler");
+    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField(MONITORING_SCHEDULER);
     monitoringSchedulerField.setAccessible(true);
     java.util.concurrent.ScheduledExecutorService monitoringScheduler = (java.util.concurrent.ScheduledExecutorService) monitoringSchedulerField.get(
         monitor);
@@ -464,7 +466,7 @@ class AsyncProcessMonitorTest {
   @Test
   void testStopHandlesInterruptedException() throws Exception {
     // Simulate a ScheduledExecutorService that throws InterruptedException
-    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField("monitoringScheduler");
+    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField(MONITORING_SCHEDULER);
     monitoringSchedulerField.setAccessible(true);
     java.util.concurrent.ScheduledExecutorService mockScheduler = new java.util.concurrent.ScheduledThreadPoolExecutor(
         1) {
@@ -548,7 +550,7 @@ class AsyncProcessMonitorTest {
   @Test
   void testRemoveAlertRuleClearsState() throws Exception {
     AsyncProcessMonitor.AlertRule temp = new AsyncProcessMonitor.AlertRule(
-        "temp-remove", AsyncProcessMonitor.AlertType.HIGH_FAILURE_RATE,
+        TEMP_REMOVE, AsyncProcessMonitor.AlertType.HIGH_FAILURE_RATE,
         AsyncProcessMonitor.AlertSeverity.WARNING, snap -> true, "Temp rule");
     monitor.addAlertRule(temp);
 
@@ -560,17 +562,17 @@ class AsyncProcessMonitorTest {
     Field alertStatesField = AsyncProcessMonitor.class.getDeclaredField("alertStates");
     alertStatesField.setAccessible(true);
     Map<String, AsyncProcessMonitor.AlertState> alertStates = (Map<String, AsyncProcessMonitor.AlertState>) alertStatesField.get(monitor);
-    assertTrue(alertStates.containsKey("temp-remove"), "Alert state should exist after trigger");
+    assertTrue(alertStates.containsKey(TEMP_REMOVE), "Alert state should exist after trigger");
 
-    monitor.removeAlertRule("temp-remove");
+    monitor.removeAlertRule(TEMP_REMOVE);
 
     // Access alertRules list to ensure removal
     Field alertRulesField = AsyncProcessMonitor.class.getDeclaredField(ALERT_RULES);
     alertRulesField.setAccessible(true);
     List<AsyncProcessMonitor.AlertRule> alertRules = (List<AsyncProcessMonitor.AlertRule>) alertRulesField.get(monitor);
 
-    assertFalse(alertRules.stream().anyMatch(r -> r.getName().equals("temp-remove")), "Rule list should not contain removed rule");
-    assertFalse(alertStates.containsKey("temp-remove"), "Alert state should be cleared for removed rule");
+    assertFalse(alertRules.stream().anyMatch(r -> r.getName().equals(TEMP_REMOVE)), "Rule list should not contain removed rule");
+    assertFalse(alertStates.containsKey(TEMP_REMOVE), "Alert state should be cleared for removed rule");
   }
 
   /**
@@ -578,7 +580,7 @@ class AsyncProcessMonitorTest {
    */
   @Test
   void testStopForcesShutdownOnTimeout() throws Exception {
-    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField("monitoringScheduler");
+    Field monitoringSchedulerField = AsyncProcessMonitor.class.getDeclaredField(MONITORING_SCHEDULER);
     monitoringSchedulerField.setAccessible(true);
     java.util.concurrent.ScheduledThreadPoolExecutor custom = new java.util.concurrent.ScheduledThreadPoolExecutor(1) {
       @SuppressWarnings("unused")
