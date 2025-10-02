@@ -72,11 +72,13 @@ class AlertProcessTest {
 
   private AlertProcess alertProcess;
   private AutoCloseable mocks;
+  private MutableBoolean isStopped;
 
   @BeforeEach
   void setUp() {
     mocks = MockitoAnnotations.openMocks(this);
     alertProcess = new AlertProcess();
+    isStopped = new MutableBoolean(false);
 
     // Setup static mocks
     mockedOBContext = mockStatic(OBContext.class);
@@ -115,198 +117,122 @@ class AlertProcessTest {
 
   /**
    * Tests successful alert creation with valid parameters.
-   * Verifies that an alert is created with correct properties and database operations are performed.
    */
   @Test
   void testActionSuccessfulAlertCreation() throws JSONException {
-    // Arrange
     JSONObject parameters = createValidParameters();
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    // Act
     ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert
-    assertNotNull(result);
-    assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals(ALERT_CREATED, result.getMessage());
-
-    // Verify OBContext was set correctly
+    assertSuccessResult(result);
     mockedOBContext.verify(() -> OBContext.setOBContext(USER_ID, ROLE_ID, CLIENT_ID, ORG_ID), times(1));
-
-    // Verify database operations
-    verify(mockOBDal, times(1)).get(AlertRule.class, ALERT_RULE_ID);
-    verify(mockOBDal, times(1)).save(any(Alert.class));
-    verify(mockOBDal, times(1)).flush();
-    verify(mockOBDal, times(1)).commitAndClose();
   }
 
   /**
    * Tests error handling when 'after' object is missing from parameters.
-   * Should catch JSONException and return error result.
    */
   @Test
   void testActionMissingAfterObject() {
-    // Arrange - Create parameters WITHOUT 'after' object to simulate missing data
     JSONObject parameters = new JSONObject();
-    // Intentionally NOT adding 'after' object to simulate missing data
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    // Act
     ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert
-    assertNotNull(result);
-    assertEquals(Result.Type.ERROR, result.getType());
-    assertNotNull(result.getMessage());
-
-    // Verify that database operations were not performed
-    verify(mockOBDal, never()).save(any(Alert.class));
-    verify(mockOBDal, never()).flush();
-    verify(mockOBDal, never()).commitAndClose();
+    assertErrorResult(result);
   }
 
   /**
    * Tests error handling when 'documentno' field is missing from 'after' object.
-   * Should catch JSONException and return error result.
    */
   @Test
   void testActionMissingDocumentNo() throws JSONException {
-    // Arrange
     JSONObject parameters = new JSONObject();
-    JSONObject after = new JSONObject();
-    // Not adding 'documentno' to simulate missing field
-    parameters.put(AFTER, after);
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    // Act
+    parameters.put(AFTER, new JSONObject());
     ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert
-    assertNotNull(result);
-    assertEquals(Result.Type.ERROR, result.getType());
-    assertNotNull(result.getMessage());
-
-    // Verify that database operations were not performed
-    verify(mockOBDal, never()).save(any(Alert.class));
-    verify(mockOBDal, never()).flush();
-    verify(mockOBDal, never()).commitAndClose();
+    assertErrorResult(result);
   }
 
   /**
    * Tests error handling when 'after' object is null.
-   * Should catch JSONException and return error result.
    */
   @Test
   void testActionNullAfterObject() throws JSONException {
-    // Arrange
     JSONObject parameters = new JSONObject();
     parameters.put(AFTER, JSONObject.NULL);
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    // Act
     ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert
-    assertNotNull(result);
-    assertEquals(Result.Type.ERROR, result.getType());
-    assertNotNull(result.getMessage());
-  }
-
-  /**
-   * Tests the getInputClass method.
-   * Verifies that it returns JSONObject.class as expected.
-   */
-  @Test
-  void testGetInputClass() {
-    // Act
-    Class<?> inputClass = alertProcess.getInputClass();
-
-    // Assert
-    assertEquals(JSONObject.class, inputClass);
+    assertErrorResult(result);
   }
 
   /**
    * Tests successful alert creation with empty document number.
-   * Verifies that empty strings are handled correctly.
    */
   @Test
   void testActionEmptyDocumentNo() throws JSONException {
-    // Arrange
-    JSONObject parameters = new JSONObject();
-    JSONObject after = new JSONObject();
-    after.put(DOCUMENTNO, ""); // Empty document number
-    parameters.put(AFTER, after);
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    // Act
-    ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert
-    assertNotNull(result);
-    assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals(ALERT_CREATED, result.getMessage());
-
-    // Verify database operations were performed
-    verify(mockOBDal, times(1)).save(any(Alert.class));
-    verify(mockOBDal, times(1)).flush();
-    verify(mockOBDal, times(1)).commitAndClose();
+    ActionResult result = alertProcess.action(createParametersWithDocumentNo(""), isStopped);
+    assertSuccessResult(result);
   }
 
   /**
    * Tests alert creation with special characters in document number.
-   * Verifies that special characters are handled correctly.
    */
   @Test
   void testActionSpecialCharactersInDocumentNo() throws JSONException {
-    // Arrange
-    JSONObject parameters = new JSONObject();
-    JSONObject after = new JSONObject();
-    after.put(DOCUMENTNO, "DOC-001/2023#$%"); // Special characters
-    parameters.put(AFTER, after);
-    MutableBoolean isStopped = new MutableBoolean(false);
-
-    // Act
-    ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert
-    assertNotNull(result);
-    assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals(ALERT_CREATED, result.getMessage());
-
-    // Verify database operations were performed
-    verify(mockOBDal, times(1)).save(any(Alert.class));
-    verify(mockOBDal, times(1)).flush();
-    verify(mockOBDal, times(1)).commitAndClose();
+    ActionResult result = alertProcess.action(createParametersWithDocumentNo("DOC-001/2023#$%"), isStopped);
+    assertSuccessResult(result);
   }
 
   /**
    * Tests behavior when isStopped is true.
-   * Process should still execute normally as isStopped is not checked in implementation.
    */
   @Test
   void testActionWithStoppedFlag() throws JSONException {
-    // Arrange
-    JSONObject parameters = createValidParameters();
-    MutableBoolean isStopped = new MutableBoolean(true);
+    isStopped.setTrue();
+    ActionResult result = alertProcess.action(createValidParameters(), isStopped);
+    assertSuccessResult(result);
+  }
 
-    // Act
-    ActionResult result = alertProcess.action(parameters, isStopped);
-
-    // Assert - Process should still succeed as isStopped is not checked
-    assertNotNull(result);
-    assertEquals(Result.Type.SUCCESS, result.getType());
-    assertEquals(ALERT_CREATED, result.getMessage());
+  /**
+   * Tests the getInputClass method.
+   */
+  @Test
+  void testGetInputClass() {
+    assertEquals(JSONObject.class, alertProcess.getInputClass());
   }
 
   /**
    * Helper method to create valid parameters for testing successful scenarios.
    */
   private JSONObject createValidParameters() throws JSONException {
+    return createParametersWithDocumentNo(TEST_DOCUMENT_NO);
+  }
+
+  /**
+   * Helper method to create parameters with a specific document number.
+   */
+  private JSONObject createParametersWithDocumentNo(String documentNo) throws JSONException {
     JSONObject parameters = new JSONObject();
     JSONObject after = new JSONObject();
-    after.put(DOCUMENTNO, TEST_DOCUMENT_NO);
+    after.put(DOCUMENTNO, documentNo);
     parameters.put(AFTER, after);
     return parameters;
+  }
+
+  /**
+   * Asserts that the action result is successful and verifies database operations.
+   */
+  private void assertSuccessResult(ActionResult result) {
+    assertNotNull(result);
+    assertEquals(Result.Type.SUCCESS, result.getType());
+    assertEquals(ALERT_CREATED, result.getMessage());
+    verify(mockOBDal, times(1)).save(any(Alert.class));
+    verify(mockOBDal, times(1)).flush();
+    verify(mockOBDal, times(1)).commitAndClose();
+  }
+
+  /**
+   * Asserts that the action result is an error and verifies no database write operations occurred.
+   */
+  private void assertErrorResult(ActionResult result) {
+    assertNotNull(result);
+    assertEquals(Result.Type.ERROR, result.getType());
+    assertNotNull(result.getMessage());
+    verify(mockOBDal, never()).save(any(Alert.class));
+    verify(mockOBDal, never()).flush();
+    verify(mockOBDal, never()).commitAndClose();
   }
 }

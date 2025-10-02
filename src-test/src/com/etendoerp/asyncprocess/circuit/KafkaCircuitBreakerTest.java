@@ -33,6 +33,18 @@ import org.junit.jupiter.api.Test;
 class KafkaCircuitBreakerTest {
 
   public static final String TEST_BREAKER = "testBreaker";
+  public static final String CUSTOM_BREAKER = "custom";
+  public static final String SUCCESS_RESULT = "ok";
+  public static final String ASYNC_RESULT = "async";
+  public static final String HALF_OPEN_RESULT = "half-open";
+  public static final String METRICS_RESULT = "metrics";
+  public static final String SHOULD_NOT_RUN = "should not run";
+
+  // Test configuration constants
+  private static final int LONG_TIMEOUT_SECONDS = 60;
+  private static final int QUICK_TIMEOUT_MILLIS = 100;
+  private static final int BUFFER_WAIT_MILLIS = 100;
+
   private KafkaCircuitBreaker breaker;
 
   /**
@@ -52,13 +64,85 @@ class KafkaCircuitBreakerTest {
   }
 
   /**
+   * Creates a long timeout configuration for testing open state behavior.
+   */
+  private KafkaCircuitBreaker.CircuitBreakerConfig createLongTimeoutConfig() {
+    return new KafkaCircuitBreaker.CircuitBreakerConfig(
+        5, Duration.ofSeconds(LONG_TIMEOUT_SECONDS), Duration.ofSeconds(LONG_TIMEOUT_SECONDS), 5000, 50, 10);
+  }
+
+  /**
+   * Creates a quick timeout configuration for testing transitions.
+   */
+  private KafkaCircuitBreaker.CircuitBreakerConfig createQuickTimeoutConfig() {
+    return new KafkaCircuitBreaker.CircuitBreakerConfig(
+        1, Duration.ofMillis(QUICK_TIMEOUT_MILLIS), Duration.ofMillis(QUICK_TIMEOUT_MILLIS), 1, 1, 1);
+  }
+
+  /**
+   * Creates a circuit breaker with auto-cleanup using try-with-resources pattern.
+   */
+  private KafkaCircuitBreaker createManagedBreaker(String name, KafkaCircuitBreaker.CircuitBreakerConfig config) {
+    return new KafkaCircuitBreaker(name, config);
+  }
+
+  /**
+   * Sets up a state change listener that sets the provided AtomicBoolean to true when called.
+   */
+  private void setupStateChangeListener(KafkaCircuitBreaker breaker, AtomicBoolean flag) {
+    breaker.setStateChangeListener((name, from, to, reason) -> flag.set(true));
+  }
+
+  /**
+   * Sets up a metrics listener that sets the provided AtomicBoolean to true when called.
+   */
+  private void setupMetricsListener(KafkaCircuitBreaker breaker, AtomicBoolean flag) {
+    breaker.setMetricsListener((name, metrics) -> flag.set(true));
+  }
+
+  /**
+   * Sets up listeners that throw exceptions to test graceful handling.
+   */
+  private void setupExceptionThrowingListeners(KafkaCircuitBreaker breaker) {
+    breaker.setStateChangeListener((name, from, to, reason) -> {
+      throw new RuntimeException("listener error");
+    });
+    breaker.setMetricsListener((name, metrics) -> {
+      throw new RuntimeException("metrics error");
+    });
+  }
+
+  /**
+   * Triggers a failure in the breaker to update lastFailureTime.
+   */
+  private void triggerFailure(KafkaCircuitBreaker breaker) {
+    assertThrows(RuntimeException.class, () -> breaker.execute(() -> {
+      throw new RuntimeException("fail");
+    }));
+  }
+
+  /**
+   * Waits for the retry interval to pass, allowing state transitions.
+   */
+  private void waitForRetryInterval(KafkaCircuitBreaker breaker) throws InterruptedException {
+    Thread.sleep(breaker.getConfig().getRetryInterval().toMillis() + BUFFER_WAIT_MILLIS);
+  }
+
+  /**
+   * Verifies that a breaker is in the expected state.
+   */
+  private void assertState(KafkaCircuitBreaker breaker, KafkaCircuitBreaker.State expectedState) {
+    assertEquals(expectedState, breaker.getState());
+  }
+
+  /**
    * Verifies default configuration, getters, and initial state.
    */
   @Test
   void testDefaultConfigAndGetters() {
     assertEquals(TEST_BREAKER, breaker.getName());
     assertNotNull(breaker.getConfig());
-    assertEquals(KafkaCircuitBreaker.State.CLOSED, breaker.getState());
+    assertState(breaker, KafkaCircuitBreaker.State.CLOSED);
     assertNotNull(breaker.getMetrics());
     assertNotNull(breaker.getStatusReport());
   }
@@ -69,9 +153,9 @@ class KafkaCircuitBreakerTest {
   @Test
   void testForceOpenAndForceClose() {
     breaker.forceOpen();
-    assertEquals(KafkaCircuitBreaker.State.OPEN, breaker.getState());
+    assertState(breaker, KafkaCircuitBreaker.State.OPEN);
     breaker.forceClose();
-    assertEquals(KafkaCircuitBreaker.State.CLOSED, breaker.getState());
+    assertState(breaker, KafkaCircuitBreaker.State.CLOSED);
   }
 
   /**
@@ -81,7 +165,7 @@ class KafkaCircuitBreakerTest {
   void testReset() {
     breaker.forceOpen();
     breaker.reset();
-    assertEquals(KafkaCircuitBreaker.State.CLOSED, breaker.getState());
+    assertState(breaker, KafkaCircuitBreaker.State.CLOSED);
     assertEquals(0, breaker.getMetrics().getTotalCalls());
   }
 
@@ -91,14 +175,14 @@ class KafkaCircuitBreakerTest {
   @Test
   void testExecuteSuccessAndFailure() {
     // Success
-    String result = breaker.execute(() -> "ok");
-    assertEquals("ok", result);
+    String result = breaker.execute(() -> SUCCESS_RESULT);
+    assertEquals(SUCCESS_RESULT, result);
     // Failure
     assertThrows(RuntimeException.class, () -> breaker.execute(() -> {
       throw new RuntimeException("fail");
     }));
     // After failures, circuit should still be CLOSED (not enough calls to open)
-    assertEquals(KafkaCircuitBreaker.State.CLOSED, breaker.getState());
+    assertState(breaker, KafkaCircuitBreaker.State.CLOSED);
   }
 
   /**
@@ -106,8 +190,8 @@ class KafkaCircuitBreakerTest {
    */
   @Test
   void testExecuteAsyncSuccessAndFailure() throws Exception {
-    CompletableFuture<String> future = breaker.executeAsync(() -> CompletableFuture.completedFuture("async"));
-    assertEquals("async", future.get(1, TimeUnit.SECONDS));
+    CompletableFuture<String> future = breaker.executeAsync(() -> CompletableFuture.completedFuture(ASYNC_RESULT));
+    assertEquals(ASYNC_RESULT, future.get(1, TimeUnit.SECONDS));
     CompletableFuture<String> failed = breaker.executeAsync(() -> {
       CompletableFuture<String> f = new CompletableFuture<>();
       f.completeExceptionally(new RuntimeException("fail"));
@@ -122,20 +206,16 @@ class KafkaCircuitBreakerTest {
    */
   @Test
   void testOpenStateBlocksExecution() {
-    KafkaCircuitBreaker.CircuitBreakerConfig config = new KafkaCircuitBreaker.CircuitBreakerConfig(
-        5, Duration.ofSeconds(60), Duration.ofSeconds(60), 5000, 50, 10);
-    KafkaCircuitBreaker longBreaker = new KafkaCircuitBreaker(TEST_BREAKER, config);
+    KafkaCircuitBreaker longBreaker = createManagedBreaker(TEST_BREAKER, createLongTimeoutConfig());
     try {
       // Trigger a failure to update lastFailureTime
-      assertThrows(RuntimeException.class, () -> longBreaker.execute(() -> {
-        throw new RuntimeException("fail");
-      }));
+      triggerFailure(longBreaker);
       longBreaker.forceOpen();
-      assertEquals(KafkaCircuitBreaker.State.OPEN, longBreaker.getState());
+      assertState(longBreaker, KafkaCircuitBreaker.State.OPEN);
       assertThrows(KafkaCircuitBreaker.CircuitBreakerException.class,
-          () -> longBreaker.execute(() -> "should not run"));
+          () -> longBreaker.execute(() -> SHOULD_NOT_RUN));
       CompletableFuture<String> future = longBreaker.executeAsync(
-          () -> CompletableFuture.completedFuture("should not run"));
+          () -> CompletableFuture.completedFuture(SHOULD_NOT_RUN));
       assertTrue(future.isCompletedExceptionally());
     } finally {
       longBreaker.shutdown();
@@ -150,10 +230,10 @@ class KafkaCircuitBreakerTest {
     // Simulate transition to HALF_OPEN
     breaker.forceOpen();
     // Simulate retry interval passed
-    Thread.sleep(breaker.getConfig().getRetryInterval().toMillis());
+    waitForRetryInterval(breaker);
     // Next call should transition to HALF_OPEN and allow execution
-    assertDoesNotThrow(() -> breaker.execute(() -> "half-open"));
-    assertEquals(KafkaCircuitBreaker.State.HALF_OPEN, breaker.getState());
+    assertDoesNotThrow(() -> breaker.execute(() -> HALF_OPEN_RESULT));
+    assertState(breaker, KafkaCircuitBreaker.State.HALF_OPEN);
   }
 
   /**
@@ -162,7 +242,7 @@ class KafkaCircuitBreakerTest {
   @Test
   void testStateChangeListener() {
     AtomicBoolean called = new AtomicBoolean(false);
-    breaker.setStateChangeListener((name, from, to, reason) -> called.set(true));
+    setupStateChangeListener(breaker, called);
     breaker.forceOpen();
     assertTrue(called.get());
   }
@@ -173,8 +253,8 @@ class KafkaCircuitBreakerTest {
   @Test
   void testMetricsListener() {
     AtomicBoolean called = new AtomicBoolean(false);
-    breaker.setMetricsListener((name, metrics) -> called.set(true));
-    breaker.execute(() -> "metrics");
+    setupMetricsListener(breaker, called);
+    breaker.execute(() -> METRICS_RESULT);
     assertTrue(called.get());
   }
 
@@ -183,15 +263,10 @@ class KafkaCircuitBreakerTest {
    */
   @Test
   void testListenersHandleExceptionsGracefully() {
-    breaker.setStateChangeListener((name, from, to, reason) -> {
-      throw new RuntimeException("listener error");
-    });
-    breaker.setMetricsListener((name, metrics) -> {
-      throw new RuntimeException("metrics error");
-    });
+    setupExceptionThrowingListeners(breaker);
     // Should not throw
     breaker.forceOpen();
-    breaker.execute(() -> "metrics");
+    breaker.execute(() -> METRICS_RESULT);
   }
 
   /**
@@ -199,11 +274,13 @@ class KafkaCircuitBreakerTest {
    */
   @Test
   void testCustomConfig() {
-    KafkaCircuitBreaker.CircuitBreakerConfig config = new KafkaCircuitBreaker.CircuitBreakerConfig(
-        1, Duration.ofMillis(100), Duration.ofMillis(100), 1, 1, 1);
-    KafkaCircuitBreaker customBreaker = new KafkaCircuitBreaker("custom", config);
-    assertEquals(config, customBreaker.getConfig());
-    customBreaker.shutdown();
+    KafkaCircuitBreaker.CircuitBreakerConfig config = createQuickTimeoutConfig();
+    KafkaCircuitBreaker customBreaker = createManagedBreaker(CUSTOM_BREAKER, config);
+    try {
+      assertEquals(config, customBreaker.getConfig());
+    } finally {
+      customBreaker.shutdown();
+    }
   }
 
   /**
@@ -212,12 +289,12 @@ class KafkaCircuitBreakerTest {
   @Test
   void testForceOpenAndRetryTransitionToHalfOpen() throws Exception {
     breaker.forceOpen();
-    assertEquals(KafkaCircuitBreaker.State.OPEN, breaker.getState());
+    assertState(breaker, KafkaCircuitBreaker.State.OPEN);
     // Wait for retry interval
-    Thread.sleep(breaker.getConfig().getRetryInterval().toMillis() + 100);
+    waitForRetryInterval(breaker);
     // Next call should transition to HALF_OPEN
-    assertDoesNotThrow(() -> breaker.execute(() -> "half-open"));
-    assertEquals(KafkaCircuitBreaker.State.HALF_OPEN, breaker.getState());
+    assertDoesNotThrow(() -> breaker.execute(() -> HALF_OPEN_RESULT));
+    assertState(breaker, KafkaCircuitBreaker.State.HALF_OPEN);
   }
 
   /**
@@ -228,6 +305,8 @@ class KafkaCircuitBreakerTest {
     breaker.shutdown();
     breaker.shutdown();
     assertTrue(
-        breaker.getState() == KafkaCircuitBreaker.State.CLOSED || breaker.getState() == KafkaCircuitBreaker.State.OPEN || breaker.getState() == KafkaCircuitBreaker.State.HALF_OPEN);
+        breaker.getState() == KafkaCircuitBreaker.State.CLOSED ||
+        breaker.getState() == KafkaCircuitBreaker.State.OPEN ||
+        breaker.getState() == KafkaCircuitBreaker.State.HALF_OPEN);
   }
 }
