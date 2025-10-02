@@ -91,6 +91,7 @@ class ReceiverRecordConsumerTest {
   public static final String PARAM_CLIENT = "param-client";
   public static final String PARAM_ORG = "param-org";
   public static final String PARAM_USER = "param-user";
+  public static final String PARAMS = "params";
 
   // Mocks
   @Mock
@@ -993,7 +994,7 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsWithParamsNoExistingUser() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", JSON_CONTEXT_PARAMS);
+    params.put(PARAMS, JSON_CONTEXT_PARAMS);
 
     // Mock no existing user
     when(mockOBContext.getUser()).thenReturn(null);
@@ -1015,7 +1016,7 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsWithParamsExistingUser() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", JSON_CONTEXT_PARAMS);
+    params.put(PARAMS, JSON_CONTEXT_PARAMS);
 
     // Mock existing user and context
     when(mockOBContext.getUser()).thenReturn(mockUser);
@@ -1072,7 +1073,7 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsWithParamsAndAfter() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", JSON_CONTEXT_PARAMS);
+    params.put(PARAMS, JSON_CONTEXT_PARAMS);
     params.put("after", "{\"updatedby\":\"after-user\",\"ad_client_id\":\"after-client\",\"ad_org_id\":\"after-org\"}");
 
     // Mock existing user
@@ -1093,7 +1094,7 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsNullRole() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", "{\"context\":{\"user\":\"test-user\",\"role\":\"null\",\"client\":\"test-client\",\"organization\":\"test-org\"}}");
+    params.put(PARAMS, "{\"context\":{\"user\":\"test-user\",\"role\":\"null\",\"client\":\"test-client\",\"organization\":\"test-org\"}}");
 
     // Mock existing user
     when(mockOBContext.getUser()).thenReturn(mockUser);
@@ -1114,7 +1115,7 @@ class ReceiverRecordConsumerTest {
   @Test
   void testSetupContextFromParamsEmptyRole() throws Exception {
     JSONObject params = new JSONObject();
-    params.put("params", "{\"context\":{\"user\":\"test-user\",\"role\":\"\",\"client\":\"test-client\",\"organization\":\"test-org\"}}");
+    params.put(PARAMS, "{\"context\":{\"user\":\"test-user\",\"role\":\"\",\"client\":\"test-client\",\"organization\":\"test-org\"}}");
 
     // Mock existing user
     when(mockOBContext.getUser()).thenReturn(mockUser);
