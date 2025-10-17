@@ -7,17 +7,22 @@ import com.etendoerp.asyncprocess.monitoring.AsyncProcessMonitor;
 import com.etendoerp.asyncprocess.recovery.ConsumerRecoveryManager;
 import com.etendoerp.reactor.EtendoReactorSetup;
 import com.smf.jobs.model.Job;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.hibernate.criterion.Restrictions;
 import org.openbravo.base.exception.OBException;
 import org.openbravo.base.session.OBPropertiesProvider;
 import org.openbravo.client.kernel.ComponentProvider;
+import org.openbravo.dal.core.OBContext;
+import org.openbravo.dal.service.OBDal;
 import reactor.core.Disposable;
 
 import javax.enterprise.context.ApplicationScoped;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
@@ -35,14 +40,12 @@ import java.util.function.Supplier;
 @ComponentProvider.Qualifier(AsyncProcessStartup.ASYNC_PROCESS_STARTUP)
 public class AsyncProcessStartup implements EtendoReactorSetup {
   public static final String ASYNC_PROCESS_STARTUP = "asyncProcessStartup";
-  private static final Logger log = LogManager.getLogger();
-
   // Configuration properties keys
   public static final String KAFKA_TOPIC_PARTITIONS = "kafka.topic.partitions";
   public static final String KAFKA_URL = "kafka.url";
-
   // Default Kafka connection values
   public static final String DEFAULT_KAFKA_URL = "localhost:29092";
+  private static final Logger log = LogManager.getLogger();
   private static final String DEFAULT_KAFKA_URL_TOMCAT_IN_DOCKER = "kafka:9092";
 
   private final Map<String, Disposable> activeSubscriptions = new HashMap<>();
@@ -57,6 +60,20 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private KafkaClientManager kafkaClientManager;
   private volatile boolean isInitialized = false;
 
+  private static String getKafkaHost(Properties obProps) {
+    if (obProps.containsKey(KAFKA_URL)) {
+      return obProps.getProperty(KAFKA_URL);
+    }
+    if (propInTrue(obProps, "docker_com.etendoerp.tomcat")) {
+      return DEFAULT_KAFKA_URL_TOMCAT_IN_DOCKER;
+    }
+    return DEFAULT_KAFKA_URL;
+  }
+
+  private static boolean propInTrue(Properties obProps, String propKey) {
+    return obProps.containsKey(propKey) && StringUtils.equalsIgnoreCase(obProps.getProperty(propKey, "false"), "true");
+  }
+
   @Override
   public void init() {
     log.info("Etendo Reactor Startup with Enhanced Resilience and Monitoring");
@@ -67,6 +84,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
 
       this.kafkaClientManager = new KafkaClientManager(kafkaHost);
 
+      if (!shouldStart()) {
+        return;
+      }
       initializeHealthChecker(kafkaHost);
       initializeCircuitBreaker();
       initializeMonitoring();
@@ -92,7 +112,30 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
-  private void initializeHealthChecker(String kafkaHost) {
+  boolean shouldStart() {
+    try {
+      OBContext.setAdminMode();
+      var critJob = OBDal.getInstance().createCriteria(Job.class);
+      critJob.add(Restrictions.eq(Job.PROPERTY_ETAPISASYNC, true));
+      List<Job> list = critJob.list();
+      if (list.isEmpty()) {
+        log.info("No async process found, reactor will not connect to any topic until restart.");
+        return false;
+      }
+      if (!isAsyncJobsEnabled()) {
+        log.warn("There are async jobs defined, but Kafka is disabled.");
+        log.warn("To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
+        log.warn(
+            "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
+        return false;
+      }
+      return true;
+    } finally {
+      OBContext.restorePreviousMode();
+    }
+  }
+
+  void initializeHealthChecker(String kafkaHost) {
     try {
       healthChecker = new KafkaHealthChecker(kafkaHost, 30, 5000);
       healthChecker.setOnKafkaHealthRestored(() -> {
@@ -115,7 +158,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
-  private void initializeCircuitBreaker() {
+  void initializeCircuitBreaker() {
     try {
       KafkaCircuitBreaker.CircuitBreakerConfig config = new KafkaCircuitBreaker.CircuitBreakerConfig(
           5, java.time.Duration.ofMinutes(2), java.time.Duration.ofSeconds(30),
@@ -135,7 +178,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
-  private void initializeMonitoring() {
+  void initializeMonitoring() {
     try {
       processMonitor = new AsyncProcessMonitor(10000, 30000); // 10s metrics, 30s alerts
       processMonitor.addAlertListener(new AsyncProcessMonitor.AlertListener() {
@@ -156,7 +199,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
-  private void initializeRecoveryManager() {
+  void initializeRecoveryManager() {
     try {
       recoveryManager = new ConsumerRecoveryManager(healthChecker, 5, 10000, 2);
       recoveryManager.setConsumerRecreationFunction(consumerInfo -> {
@@ -181,7 +224,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     }
   }
 
-  private void initializeReconfigurationManager() {
+  void initializeReconfigurationManager() {
     try {
       reconfigurationManager = new AsyncProcessReconfigurationManager(healthChecker, recoveryManager);
       reconfigurationManager.addConfigurationChangeListener(
@@ -211,7 +254,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   /**
    * Performs the initial setup by creating Kafka clients and delegating to the JobProcessor.
    */
-  private void performInitialSetup() {
+  void performInitialSetup() {
     try {
       CompletableFuture<Void> setupFuture = circuitBreaker.executeAsync(() ->
           CompletableFuture.runAsync(() -> executeWithClassLoaderContext(this::executeKafkaSetup)));
@@ -283,20 +326,6 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
     } catch (Exception healthError) {
       log.error("Failed to start health checker during failure recovery", healthError);
     }
-  }
-
-  private static String getKafkaHost(Properties obProps) {
-    if (obProps.containsKey(KAFKA_URL)) {
-      return obProps.getProperty(KAFKA_URL);
-    }
-    if (propInTrue(obProps, "docker_com.etendoerp.tomcat")) {
-      return DEFAULT_KAFKA_URL_TOMCAT_IN_DOCKER;
-    }
-    return DEFAULT_KAFKA_URL;
-  }
-
-  private static boolean propInTrue(Properties obProps, String propKey) {
-    return obProps.containsKey(propKey) && StringUtils.equalsIgnoreCase(obProps.getProperty(propKey, "false"), "true");
   }
 
   private boolean isAsyncJobsEnabled() {
