@@ -50,6 +50,8 @@ public class ReceiverRecordConsumer
   public static final String ORGANIZATION = "organization";
   public static final String CLIENT = "client";
   public static final String CONTEXT = "context";
+  public static final String USER = "user";
+  public static final String ROLE = "role";
 
   // Configuration container to reduce constructor parameters
   public static class ConsumerConfig {
@@ -441,6 +443,27 @@ public class ReceiverRecordConsumer
       RequestContext.get().setRequest(
           createFakeHttpServletRequest()
       );
+    }
+
+    try {
+        if (params.has(PARAMS)) {
+            JSONObject innerParams = new JSONObject(params.getString(PARAMS));
+            if (innerParams.has(CONTEXT)) {
+                JSONObject ctx = innerParams.getJSONObject(CONTEXT);
+                
+                // Set VariablesSecureApp based on context info of the message
+                VariablesSecureApp vars = new VariablesSecureApp(
+                    ctx.getString(USER),
+                    ctx.getString(CLIENT), 
+                    ctx.getString(ORGANIZATION), 
+                    ctx.getString(ROLE)
+                );
+                RequestContext.get().setVariableSecureApp(vars);
+            }
+        }
+    } catch (JSONException e) {
+        logger.error("Error setting VariablesSecureApp from parameters: {}", e.getMessage(), e);
+        throw new OBException(e);
     }
     return AsyncAction.run(config.getActionFactory(), params);
   }
