@@ -18,6 +18,7 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.base.exception.OBException;
+import org.openbravo.base.secureApp.VariablesSecureApp;
 import org.openbravo.client.application.Process;
 import org.openbravo.client.kernel.RequestContext;
 import org.openbravo.dal.core.OBContext;
@@ -234,8 +235,10 @@ public class ReceiverRecordConsumer
   /**
    * Processes a record with retry support
    *
-   * @param receiverRecord The record to process
-   * @param attemptNumber  The current attempt number
+   * @param receiverRecord
+   *     The record to process
+   * @param attemptNumber
+   *     The current attempt number
    */
   private void processRecord(ReceiverRecord<String, AsyncProcessExecution> receiverRecord,
       int attemptNumber) {
@@ -346,6 +349,7 @@ public class ReceiverRecordConsumer
 
   /**
    * Sets OB context based on provided context information
+   *
    * @param context
    * @param contextInfo
    */
@@ -359,7 +363,8 @@ public class ReceiverRecordConsumer
     String organization = context.optString(ORGANIZATION, contextInfo.previousOrgId);
 
     if (StringUtils.isEmpty(user) || StringUtils.isEmpty(client)
-        || StringUtils.isEmpty(organization) || StringUtils.equals(user, "null") || StringUtils.equals(role, "null") || StringUtils.equals(client, "null") || StringUtils.equals(organization, "null")) {
+        || StringUtils.isEmpty(organization) || StringUtils.equals(user, "null") || StringUtils.equals(role,
+        "null") || StringUtils.equals(client, "null") || StringUtils.equals(organization, "null")) {
       throw new OBException(
           "Invalid context in message parameters. user, role, client and organization are required.");
     }
@@ -370,6 +375,7 @@ public class ReceiverRecordConsumer
 
   /**
    * Extracts method information from parameters
+   *
    * @param params
    * @param context
    * @throws JSONException
@@ -385,10 +391,9 @@ public class ReceiverRecordConsumer
 
   /**
    * Extracts context information from parameters
+   *
    * @param params
-   * @param context
    * @param contextInfo
-   * @return
    * @throws JSONException
    */
   private static JSONObject getContextFromParms(JSONObject params,
@@ -446,24 +451,24 @@ public class ReceiverRecordConsumer
     }
 
     try {
-        if (params.has(PARAMS)) {
-            JSONObject innerParams = new JSONObject(params.getString(PARAMS));
-            if (innerParams.has(CONTEXT)) {
-                JSONObject ctx = innerParams.getJSONObject(CONTEXT);
-                
-                // Set VariablesSecureApp based on context info of the message
-                VariablesSecureApp vars = new VariablesSecureApp(
-                    ctx.getString(USER),
-                    ctx.getString(CLIENT), 
-                    ctx.getString(ORGANIZATION), 
-                    ctx.getString(ROLE)
-                );
-                RequestContext.get().setVariableSecureApp(vars);
-            }
+      if (params.has(PARAMS)) {
+        JSONObject innerParams = new JSONObject(params.getString(PARAMS));
+        if (innerParams.has(CONTEXT)) {
+          JSONObject ctx = innerParams.getJSONObject(CONTEXT);
+
+          // Set VariablesSecureApp based on context info of the message
+          VariablesSecureApp vars = new VariablesSecureApp(
+              ctx.getString(USER),
+              ctx.getString(CLIENT),
+              ctx.getString(ORGANIZATION),
+              ctx.getString(ROLE)
+          );
+          RequestContext.get().setVariableSecureApp(vars);
         }
+      }
     } catch (JSONException e) {
-        logger.error("Error setting VariablesSecureApp from parameters: {}", e.getMessage(), e);
-        throw new OBException(e);
+      logger.error("Error setting VariablesSecureApp from parameters: {}", e.getMessage(), e);
+      throw new OBException(e);
     }
     return AsyncAction.run(config.getActionFactory(), params);
   }
@@ -572,7 +577,8 @@ public class ReceiverRecordConsumer
    *   <li>If the message field is not a valid JSON, it is ignored.</li>
    * </ul>
    *
-   * @param result The ActionResult to extract the topics from
+   * @param result
+   *     The ActionResult to extract the topics from
    * @return A list of topics to send the response to
    */
   private List<String> extractTargetsFromResult(ActionResult result) {
@@ -655,9 +661,12 @@ public class ReceiverRecordConsumer
   /**
    * Creates and sends a response message to the specified topic.
    *
-   * @param topic          The Kafka topic to send the response to
-   * @param kafkaSender    The Kafka sender instance
-   * @param responseRecord The response record to send
+   * @param topic
+   *     The Kafka topic to send the response to
+   * @param kafkaSender
+   *     The Kafka sender instance
+   * @param responseRecord
+   *     The response record to send
    */
   public void createResponse(String topic, KafkaSender<String, AsyncProcessExecution> kafkaSender,
       AsyncProcessExecution responseRecord) {
