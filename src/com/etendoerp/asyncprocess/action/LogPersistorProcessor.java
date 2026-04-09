@@ -5,9 +5,9 @@ import java.security.NoSuchAlgorithmException;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Iterator;
 
-import javax.enterprise.inject.Any;
-import javax.enterprise.inject.Instance;
-import javax.inject.Inject;
+import jakarta.enterprise.inject.Any;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.mutable.MutableBoolean;
@@ -19,6 +19,7 @@ import org.openbravo.base.exception.OBException;
 import org.openbravo.client.application.Process;
 import org.openbravo.dal.core.OBContext;
 import org.openbravo.dal.service.OBDal;
+import org.openbravo.dal.service.Restrictions;
 
 import com.auth0.jwt.interfaces.DecodedJWT;
 import com.etendoerp.asyncprocess.data.Log;
@@ -180,7 +181,7 @@ public class LogPersistorProcessor extends Action {
   private LogHeader getOrCreateLogHeader(String asyncProcessId) {
     LogHeader logHeader = (LogHeader) OBDal.getInstance()
         .createCriteria(LogHeader.class)
-        .add(org.hibernate.criterion.Restrictions.eq(LogHeader.PROPERTY_PROCESS, asyncProcessId))
+        .add(Restrictions.eq(LogHeader.PROPERTY_PROCESS, asyncProcessId))
         .setMaxResults(1)
         .uniqueResult();
 

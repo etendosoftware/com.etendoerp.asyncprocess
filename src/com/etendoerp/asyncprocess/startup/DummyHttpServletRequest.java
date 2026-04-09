@@ -1,9 +1,9 @@
 package com.etendoerp.asyncprocess.startup;
 
-import javax.servlet.http.Cookie;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpSession;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import java.security.Principal;
 import java.util.Enumeration;
 
@@ -174,7 +174,6 @@ class DummyHttpServletRequest implements HttpServletRequest {
     return false;
   }
 
-  @Override
   public boolean isRequestedSessionIdFromUrl() {
     return false;
   }
@@ -193,17 +192,17 @@ class DummyHttpServletRequest implements HttpServletRequest {
   }
 
   @Override
-  public java.util.Collection<javax.servlet.http.Part> getParts() {
+  public java.util.Collection<jakarta.servlet.http.Part> getParts() {
     return java.util.Collections.emptyList();
   }
 
   @Override
-  public javax.servlet.http.Part getPart(String name) {
+  public jakarta.servlet.http.Part getPart(String name) {
     return null;
   }
 
   @Override
-  public <T extends javax.servlet.http.HttpUpgradeHandler> T upgrade(Class<T> handlerClass) {
+  public <T extends jakarta.servlet.http.HttpUpgradeHandler> T upgrade(Class<T> handlerClass) {
     return null;
   }
 
@@ -250,7 +249,7 @@ class DummyHttpServletRequest implements HttpServletRequest {
   }
 
   @Override
-  public javax.servlet.ServletInputStream getInputStream() {
+  public jakarta.servlet.ServletInputStream getInputStream() {
     return null;
   }
 
@@ -346,12 +345,26 @@ class DummyHttpServletRequest implements HttpServletRequest {
   }
 
   @Override
-  public javax.servlet.RequestDispatcher getRequestDispatcher(String path) {
+  public jakarta.servlet.RequestDispatcher getRequestDispatcher(String path) {
+    return null;
+  }
+
+  public String getRealPath(String path) {
     return null;
   }
 
   @Override
-  public String getRealPath(String path) {
+  public String getRequestId() {
+    return "";
+  }
+
+  @Override
+  public String getProtocolRequestId() {
+    return "";
+  }
+
+  @Override
+  public jakarta.servlet.ServletConnection getServletConnection() {
     return null;
   }
 
@@ -376,18 +389,18 @@ class DummyHttpServletRequest implements HttpServletRequest {
   }
 
   @Override
-  public javax.servlet.ServletContext getServletContext() {
+  public jakarta.servlet.ServletContext getServletContext() {
     return null;
   }
 
   @Override
-  public javax.servlet.AsyncContext startAsync() {
+  public jakarta.servlet.AsyncContext startAsync() {
     return null;
   }
 
   @Override
-  public javax.servlet.AsyncContext startAsync(javax.servlet.ServletRequest servletRequest,
-      javax.servlet.ServletResponse servletResponse) {
+  public jakarta.servlet.AsyncContext startAsync(jakarta.servlet.ServletRequest servletRequest,
+      jakarta.servlet.ServletResponse servletResponse) {
     return null;
   }
 
@@ -402,12 +415,12 @@ class DummyHttpServletRequest implements HttpServletRequest {
   }
 
   @Override
-  public javax.servlet.AsyncContext getAsyncContext() {
+  public jakarta.servlet.AsyncContext getAsyncContext() {
     return null;
   }
 
   @Override
-  public javax.servlet.DispatcherType getDispatcherType() {
-    return javax.servlet.DispatcherType.REQUEST;
+  public jakarta.servlet.DispatcherType getDispatcherType() {
+    return jakarta.servlet.DispatcherType.REQUEST;
   }
 }
