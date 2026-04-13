@@ -55,7 +55,6 @@ class DummyHttpServletRequestTest {
         assertFalse(req.isRequestedSessionIdValid());
         assertFalse(req.isRequestedSessionIdFromCookie());
         assertFalse(req.isRequestedSessionIdFromURL());
-        assertFalse(req.isRequestedSessionIdFromUrl());
         assertDoesNotThrow(() -> {
             assertFalse(req.authenticate(null));
         });
@@ -88,7 +87,6 @@ class DummyHttpServletRequestTest {
         assertTrue(req.getLocales().hasMoreElements());
         assertFalse(req.isSecure());
         assertNull(req.getRequestDispatcher("/any"));
-        assertNull(req.getRealPath("/any"));
         assertEquals(0, req.getRemotePort());
         assertEquals(LOCALHOST, req.getLocalName());
         assertEquals("127.0.0.1", req.getLocalAddr());
