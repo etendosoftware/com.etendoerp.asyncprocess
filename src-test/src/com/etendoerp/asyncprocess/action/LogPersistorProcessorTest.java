@@ -104,7 +104,7 @@ class LogPersistorProcessorTest {
     doNothing().when(obDal).flush();
 
     when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
-    when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+    when(obCriteria.add(any(Restriction.class))).thenReturn(obCriteria);
     when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
     when(obCriteria.uniqueResult()).thenReturn(null); // Default case
 
