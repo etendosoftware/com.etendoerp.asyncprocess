@@ -128,7 +128,8 @@ public class KafkaClientManagerTest {
         Map.of(TEST_TOPIC, mock(org.apache.kafka.clients.admin.TopicDescription.class))));
     when(mockAdminClient.listTopics()).thenReturn(mock(org.apache.kafka.clients.admin.ListTopicsResult.class));
     when(mockAdminClient.listTopics().names()).thenReturn(KafkaFuture.completedFuture(Collections.emptySet()));
-    when(mockAdminClient.describeTopics(any(java.util.Collection.class))).thenReturn(mockDescribeResult);
+    when(mockAdminClient.describeTopics(org.mockito.ArgumentMatchers.<java.util.Collection<String>>any()))
+        .thenReturn(mockDescribeResult);
 
     manager.existsOrCreateTopic(mockAdminClient, TEST_TOPIC, 5);
     verify(mockAdminClient).createTopics(any());
@@ -147,7 +148,8 @@ public class KafkaClientManagerTest {
     when(mockDescribeResult2.all()).thenReturn(KafkaFuture.completedFuture(Map.of(TEST_TOPIC, mockTopicDescription)));
     when(mockAdminClient.listTopics()).thenReturn(mock(org.apache.kafka.clients.admin.ListTopicsResult.class));
     when(mockAdminClient.listTopics().names()).thenReturn(KafkaFuture.completedFuture(java.util.Set.of(TEST_TOPIC)));
-    when(mockAdminClient.describeTopics(any(java.util.Collection.class))).thenReturn(mockDescribeResult2);
+    when(mockAdminClient.describeTopics(org.mockito.ArgumentMatchers.<java.util.Collection<String>>any()))
+        .thenReturn(mockDescribeResult2);
 
     manager.existsOrCreateTopic(mockAdminClient, TEST_TOPIC, 5);
     verify(mockAdminClient).createPartitions(any());

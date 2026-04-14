@@ -1,9 +1,6 @@
 package com.etendoerp.asyncprocess.startup;
 
 import org.junit.jupiter.api.Test;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.ServletException;
-import java.io.IOException;
 import java.util.Collections;
 import java.util.Locale;
 
@@ -29,7 +26,7 @@ class DummyHttpServletRequestTest {
      */
     @Test
     void testDefaults() {
-        HttpServletRequest req = new DummyHttpServletRequest();
+        DummyHttpServletRequest req = new DummyHttpServletRequest();
         assertNull(req.getAuthType());
         assertEquals(0, req.getCookies().length);
         assertEquals(-1, req.getDateHeader("any"));
@@ -55,6 +52,7 @@ class DummyHttpServletRequestTest {
         assertFalse(req.isRequestedSessionIdValid());
         assertFalse(req.isRequestedSessionIdFromCookie());
         assertFalse(req.isRequestedSessionIdFromURL());
+        assertFalse(req.isRequestedSessionIdFromUrl());
         assertDoesNotThrow(() -> {
             assertFalse(req.authenticate(null));
         });
@@ -87,6 +85,7 @@ class DummyHttpServletRequestTest {
         assertTrue(req.getLocales().hasMoreElements());
         assertFalse(req.isSecure());
         assertNull(req.getRequestDispatcher("/any"));
+        assertNull(req.getRealPath("/any"));
         assertEquals(0, req.getRemotePort());
         assertEquals(LOCALHOST, req.getLocalName());
         assertEquals("127.0.0.1", req.getLocalAddr());
