@@ -123,11 +123,12 @@ public class KafkaClientManagerTest {
 
   @Test
   void testExistsOrCreateTopic() {
+    var mockDescribeResult = mock(org.apache.kafka.clients.admin.DescribeTopicsResult.class);
+    when(mockDescribeResult.all()).thenReturn(KafkaFuture.completedFuture(
+        Map.of(TEST_TOPIC, mock(org.apache.kafka.clients.admin.TopicDescription.class))));
     when(mockAdminClient.listTopics()).thenReturn(mock(org.apache.kafka.clients.admin.ListTopicsResult.class));
     when(mockAdminClient.listTopics().names()).thenReturn(KafkaFuture.completedFuture(Collections.emptySet()));
-    when(mockAdminClient.describeTopics(any(java.util.Collection.class))).thenReturn(mock(org.apache.kafka.clients.admin.DescribeTopicsResult.class));
-    when(mockAdminClient.describeTopics(any(java.util.Collection.class)).all()).thenReturn(KafkaFuture.completedFuture(
-        Map.of(TEST_TOPIC, mock(org.apache.kafka.clients.admin.TopicDescription.class))));
+    when(mockAdminClient.describeTopics(any(java.util.Collection.class))).thenReturn(mockDescribeResult);
 
     manager.existsOrCreateTopic(mockAdminClient, TEST_TOPIC, 5);
     verify(mockAdminClient).createTopics(any());
@@ -142,11 +143,11 @@ public class KafkaClientManagerTest {
         mock(org.apache.kafka.common.TopicPartitionInfo.class)
     ));
 
+    var mockDescribeResult2 = mock(org.apache.kafka.clients.admin.DescribeTopicsResult.class);
+    when(mockDescribeResult2.all()).thenReturn(KafkaFuture.completedFuture(Map.of(TEST_TOPIC, mockTopicDescription)));
     when(mockAdminClient.listTopics()).thenReturn(mock(org.apache.kafka.clients.admin.ListTopicsResult.class));
     when(mockAdminClient.listTopics().names()).thenReturn(KafkaFuture.completedFuture(java.util.Set.of(TEST_TOPIC)));
-    when(mockAdminClient.describeTopics(any(java.util.Collection.class))).thenReturn(mock(org.apache.kafka.clients.admin.DescribeTopicsResult.class));
-    when(mockAdminClient.describeTopics(any(java.util.Collection.class)).all()).thenReturn(KafkaFuture.completedFuture(
-        Map.of(TEST_TOPIC, mockTopicDescription)));
+    when(mockAdminClient.describeTopics(any(java.util.Collection.class))).thenReturn(mockDescribeResult2);
 
     manager.existsOrCreateTopic(mockAdminClient, TEST_TOPIC, 5);
     verify(mockAdminClient).createPartitions(any());
