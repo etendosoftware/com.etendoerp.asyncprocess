@@ -52,7 +52,6 @@ class DummyHttpServletRequestTest {
         assertFalse(req.isRequestedSessionIdValid());
         assertFalse(req.isRequestedSessionIdFromCookie());
         assertFalse(req.isRequestedSessionIdFromURL());
-        assertFalse(req.isRequestedSessionIdFromUrl());
         assertDoesNotThrow(() -> {
             assertFalse(req.authenticate(null));
         });

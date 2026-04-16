@@ -88,11 +88,6 @@ class DummyHttpServletRequest extends AbstractDummyHttpServletRequest {
   }
 
   @Override
-  public boolean isRequestedSessionIdFromUrl() {
-    return false;
-  }
-
-  @Override
   public boolean authenticate(HttpServletResponse response) {
     return false;
   }

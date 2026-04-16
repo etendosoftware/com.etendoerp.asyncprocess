@@ -120,4 +120,5 @@ abstract class AbstractDummyHttpServletRequest extends AbstractDummyServletReque
   public Principal getUserPrincipal() {
     return null;
   }
+
 }
