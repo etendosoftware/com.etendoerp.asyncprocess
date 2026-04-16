@@ -169,11 +169,6 @@ abstract class AbstractDummyServletRequest implements HttpServletRequest {
   }
 
   @Override
-  public String getRealPath(String path) {
-    return null;
-  }
-
-  @Override
   public ServletContext getServletContext() {
     return null;
   }
