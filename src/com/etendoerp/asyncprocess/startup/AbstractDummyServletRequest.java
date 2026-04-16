@@ -23,6 +23,8 @@ import java.util.Map;
  */
 abstract class AbstractDummyServletRequest implements HttpServletRequest {
 
+  private static final String LOCALHOST = "localhost";
+
   @Override
   public Object getAttribute(String name) {
     return null;
@@ -108,7 +110,7 @@ abstract class AbstractDummyServletRequest implements HttpServletRequest {
   /** Returns the host name used in the dummy request environment. Default: "localhost". */
   @Override
   public String getServerName() {
-    return "localhost";
+    return LOCALHOST;
   }
 
   /** Returns the server port used in the dummy request environment. Default: 8080. */
@@ -125,7 +127,7 @@ abstract class AbstractDummyServletRequest implements HttpServletRequest {
 
   @Override
   public String getRemoteHost() {
-    return "localhost";
+    return LOCALHOST;
   }
 
   @Override
@@ -140,7 +142,7 @@ abstract class AbstractDummyServletRequest implements HttpServletRequest {
 
   @Override
   public String getLocalName() {
-    return "localhost";
+    return LOCALHOST;
   }
 
   @Override
