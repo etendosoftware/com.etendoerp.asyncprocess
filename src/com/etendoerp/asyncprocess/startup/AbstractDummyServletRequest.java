@@ -127,7 +127,7 @@ abstract class AbstractDummyServletRequest implements HttpServletRequest {
 
   @Override
   public String getRemoteHost() {
-    return LOCALHOST;
+    return getServerName();
   }
 
   @Override
@@ -142,7 +142,7 @@ abstract class AbstractDummyServletRequest implements HttpServletRequest {
 
   @Override
   public String getLocalName() {
-    return LOCALHOST;
+    return getServerName();
   }
 
   @Override
