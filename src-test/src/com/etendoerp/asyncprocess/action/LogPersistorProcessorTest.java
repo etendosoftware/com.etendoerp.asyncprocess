@@ -15,12 +15,12 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-import javax.enterprise.inject.Instance;
+import jakarta.enterprise.inject.Instance;
 
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
-import org.hibernate.criterion.Criterion;
+import org.openbravo.dal.service.Restriction;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,7 +104,7 @@ class LogPersistorProcessorTest {
     doNothing().when(obDal).flush();
 
     when(obDal.createCriteria(LogHeader.class)).thenReturn(obCriteria);
-    when(obCriteria.add(any(Criterion.class))).thenReturn(obCriteria);
+    when(obCriteria.add(any(Restriction.class))).thenReturn(obCriteria);
     when(obCriteria.setMaxResults(anyInt())).thenReturn(obCriteria);
     when(obCriteria.uniqueResult()).thenReturn(null); // Default case
 

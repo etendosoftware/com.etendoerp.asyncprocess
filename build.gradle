@@ -54,6 +54,9 @@ repositories {
     maven {
         url "https://repo.futit.cloud/repository/maven-public-jars"
     }
+    maven {
+        url "https://repo.futit.cloud/repository/maven-snapshots"
+    }
 }
 
 /**
@@ -61,8 +64,8 @@ repositories {
 * Ex: implementation "com.sun.mail:javax.mail:1.6.2"
 */
 dependencies {
-    implementation('com.etendoerp:reactor:3.0.0')
-    implementation('com.etendoerp.platform:etendo-core:[26.1.0,26.2.0)')
+    implementation('com.etendoerp:reactor:3.0.0-SNAPSHOT')
+    implementation('com.etendoerp.platform:etendo-core:[27.1.0,27.2.0)')
     implementation('com.google.code.gson:gson:2.10')
 }
 

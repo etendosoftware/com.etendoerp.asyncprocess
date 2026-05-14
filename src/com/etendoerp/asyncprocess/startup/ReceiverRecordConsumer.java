@@ -18,6 +18,7 @@ import org.codehaus.jettison.json.JSONArray;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 import org.openbravo.base.exception.OBException;
+import org.openbravo.dal.service.Restrictions;
 import org.openbravo.base.secureApp.VariablesSecureApp;
 import org.openbravo.client.application.Process;
 import org.openbravo.client.kernel.RequestContext;
@@ -37,7 +38,7 @@ import reactor.kafka.receiver.ReceiverRecord;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderRecord;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * Enhanced class that encapsulates all necessary objects to receive a message,
@@ -508,7 +509,7 @@ public class ReceiverRecordConsumer
       String actionClassName = config.getActionFactory().get().getClass().getName();
       Process actionObj = (Process) OBDal.getInstance()
           .createCriteria(org.openbravo.client.application.Process.class)
-          .add(org.hibernate.criterion.Restrictions.eq("javaClassName", actionClassName))
+          .add(Restrictions.eq("javaClassName", actionClassName))
           .setMaxResults(1)
           .uniqueResult();
       params.put("obuiapp_process_id", actionObj == null ? "" : actionObj.getId());
