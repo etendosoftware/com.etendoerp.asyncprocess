@@ -37,6 +37,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -47,6 +48,11 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Appender;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.CreateTopicsResult;
 import org.apache.kafka.clients.admin.ListTopicsResult;
@@ -316,6 +322,103 @@ class AsyncProcessStartupTest {
 
     verify(checker, times(2)).isKafkaHealthy();
     verify(recovery, times(1)).setRecoveryEnabled(true);
+  }
+
+  /**
+   * Skips startup when there are no asynchronous jobs and restores the administrator context.
+   */
+  @Test
+  void testShouldStartWithoutAsyncJobs() {
+    when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
+    when(mockCriteria.list()).thenReturn(Collections.emptyList());
+
+    assertFalse(asyncProcessStartup.shouldStart());
+
+    mockedOBContext.verify(OBContext::setAdminMode);
+    mockedOBContext.verify(OBContext::restorePreviousMode);
+    verify(mockPropertiesProvider, never()).getOpenbravoProperties();
+  }
+
+  /**
+   * Reports disabled Kafka at INFO and skips startup even when asynchronous jobs exist.
+   */
+  @Test
+  void testShouldStartWithKafkaDisabledLogsAtInfo() {
+    when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
+    when(mockCriteria.list()).thenReturn(Collections.singletonList(mockJob));
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("false");
+
+    Logger logger = (Logger)
+        LogManager.getLogger(AsyncProcessStartup.class);
+    Level previousLevel = logger.getLevel();
+    Appender appender = mock(Appender.class);
+    when(appender.getName()).thenReturn("startup-test");
+    when(appender.isStarted()).thenReturn(true);
+    List<LogEvent> events = new ArrayList<>();
+    doAnswer(invocation -> {
+      LogEvent event = invocation.getArgument(0);
+      events.add(event.toImmutable());
+      return null;
+    }).when(appender).append(any());
+    logger.addAppender(appender);
+    logger.setLevel(Level.INFO);
+    try {
+      assertFalse(asyncProcessStartup.shouldStart());
+
+      assertEquals(3, events.size());
+      assertTrue(events.stream().allMatch(event -> event.getLevel() == Level.INFO));
+      assertTrue(events.get(0).getMessage().getFormattedMessage().contains("Kafka is disabled"));
+      assertTrue(events.get(1).getMessage().getFormattedMessage().contains(KAFKA_ENABLE_KEY));
+      assertTrue(events.get(2).getMessage().getFormattedMessage().contains("./gradlew setup smartbuild"));
+      mockedOBContext.verify(OBContext::restorePreviousMode);
+    } finally {
+      logger.removeAppender(appender);
+      logger.setLevel(previousLevel);
+    }
+  }
+
+  /**
+   * Treats a missing Kafka enable property as disabled and restores the administrator context.
+   */
+  @Test
+  void testShouldStartWithKafkaPropertyMissing() {
+    when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
+    when(mockCriteria.list()).thenReturn(Collections.singletonList(mockJob));
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(false);
+
+    assertFalse(asyncProcessStartup.shouldStart());
+
+    mockedOBContext.verify(OBContext::restorePreviousMode);
+  }
+
+  /**
+   * Allows startup when asynchronous jobs exist and Kafka is enabled.
+   */
+  @Test
+  void testShouldStartWithKafkaEnabled() {
+    when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
+    when(mockCriteria.list()).thenReturn(Collections.singletonList(mockJob));
+    when(mockProperties.containsKey(KAFKA_ENABLE_KEY)).thenReturn(true);
+    when(mockProperties.getProperty(KAFKA_ENABLE_KEY, KAFKA_ENABLE_VALUE)).thenReturn("true");
+
+    assertTrue(asyncProcessStartup.shouldStart());
+
+    mockedOBContext.verify(OBContext::restorePreviousMode);
+  }
+
+  /**
+   * Restores the administrator context if querying asynchronous jobs fails.
+   */
+  @Test
+  void testShouldStartRestoresContextOnQueryFailure() {
+    when(mockOBDal.createCriteria(Job.class)).thenReturn(mockCriteria);
+    OBException failure = new OBException("Unable to query asynchronous jobs");
+    when(mockCriteria.list()).thenThrow(failure);
+
+    assertSame(failure, assertThrows(OBException.class, () -> asyncProcessStartup.shouldStart()));
+
+    mockedOBContext.verify(OBContext::restorePreviousMode);
   }
 
   /**
