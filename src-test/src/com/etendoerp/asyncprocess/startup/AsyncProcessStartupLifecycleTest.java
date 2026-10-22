@@ -26,40 +26,38 @@ class AsyncProcessStartupLifecycleTest {
   /**
    * Preserves the application classloader when it is already installed.
    *
-   * @throws Exception if the startup callback cannot be invoked
+   * @throws ReflectiveOperationException if the startup callback cannot be invoked
    */
   @Test
-  void testCallbackWithApplicationClassLoader() throws Exception {
+  void testCallbackWithApplicationClassLoader() throws ReflectiveOperationException {
     verifyCallbackClassLoader(AsyncProcessStartup.class.getClassLoader());
   }
 
   /**
    * Installs the application classloader and restores a missing context classloader.
    *
-   * @throws Exception if the startup callback cannot be invoked
+   * @throws ReflectiveOperationException if the startup callback cannot be invoked
    */
   @Test
-  void testCallbackWithMissingClassLoader() throws Exception {
+  void testCallbackWithMissingClassLoader() throws ReflectiveOperationException {
     verifyCallbackClassLoader(null);
   }
 
   /**
    * Installs the application classloader and restores a different context classloader.
    *
-   * @throws Exception if the startup callback cannot be invoked
+   * @throws ReflectiveOperationException if the startup callback cannot be invoked
    */
   @Test
-  void testCallbackWithDifferentClassLoader() throws Exception {
+  void testCallbackWithDifferentClassLoader() throws ReflectiveOperationException {
     verifyCallbackClassLoader(new ClassLoader(AsyncProcessStartup.class.getClassLoader()) { });
   }
 
   /**
    * Restores the original classloader when the callback fails.
-   *
-   * @throws Exception if the callback method cannot be accessed
    */
   @Test
-  void testCallbackFailureRestoresClassLoader() throws Exception {
+  void testCallbackFailureRestoresClassLoader() {
     Thread thread = Thread.currentThread();
     ClassLoader original = thread.getContextClassLoader();
     IllegalStateException failure = new IllegalStateException("Callback failed");
@@ -80,10 +78,10 @@ class AsyncProcessStartupLifecycleTest {
   /**
    * Delegates successful manual recovery to the configured recovery manager.
    *
-   * @throws Exception if the recovery manager field cannot be accessed
+   * @throws ReflectiveOperationException if the recovery manager field cannot be accessed
    */
   @Test
-  void testManualConsumerRecoverySucceeds() throws Exception {
+  void testManualConsumerRecoverySucceeds() throws ReflectiveOperationException {
     ConsumerRecoveryManager recovery = mock(ConsumerRecoveryManager.class);
     Field field = AsyncProcessStartup.class.getDeclaredField("recoveryManager");
     field.setAccessible(true);
@@ -98,9 +96,9 @@ class AsyncProcessStartupLifecycleTest {
    * Checks the classloader visible to a callback and restoration after completion.
    *
    * @param context the classloader installed before running the callback
-   * @throws Exception if the startup callback cannot be invoked
+   * @throws ReflectiveOperationException if the startup callback cannot be invoked
    */
-  private void verifyCallbackClassLoader(ClassLoader context) throws Exception {
+  private void verifyCallbackClassLoader(ClassLoader context) throws ReflectiveOperationException {
     Thread thread = Thread.currentThread();
     ClassLoader original = thread.getContextClassLoader();
     try {
@@ -121,9 +119,9 @@ class AsyncProcessStartupLifecycleTest {
    *
    * @param callback the operation to run with the application classloader
    * @return the callback result
-   * @throws Exception if reflection or the callback fails
+   * @throws ReflectiveOperationException if reflection or the callback fails
    */
-  private Object invokeCallback(Supplier<?> callback) throws Exception {
+  private Object invokeCallback(Supplier<?> callback) throws ReflectiveOperationException {
     Method method = AsyncProcessStartup.class.getDeclaredMethod("executeWithClassLoaderContext", Supplier.class);
     method.setAccessible(true);
     return method.invoke(startup, callback);
