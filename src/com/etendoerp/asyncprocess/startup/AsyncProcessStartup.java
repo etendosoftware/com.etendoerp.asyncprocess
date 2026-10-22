@@ -123,9 +123,9 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
         return false;
       }
       if (!isAsyncJobsEnabled()) {
-        log.warn("There are async jobs defined, but Kafka is disabled.");
-        log.warn("To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
-        log.warn(
+        log.info("There are async jobs defined, but Kafka is disabled.");
+        log.info("To enable async jobs, set the property 'kafka.enable' to true in gradle.properties.");
+        log.info(
             "The recommended steps are editing the gradle.properties, and then running './gradlew setup smartbuild' to update and deploy the Openbravo.properties file.");
         return false;
       }
@@ -291,7 +291,7 @@ public class AsyncProcessStartup implements EtendoReactorSetup {
   private Void executeKafkaSetup() {
     try {
       if (!isAsyncJobsEnabled()) {
-        log.warn("There are async jobs defined, but Kafka is disabled.");
+        log.info("There are async jobs defined, but Kafka is disabled.");
         return null;
       }
       try (AdminClient adminClient = kafkaClientManager.createAdminClient()) {
